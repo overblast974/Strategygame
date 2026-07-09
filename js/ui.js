@@ -59,12 +59,42 @@ function assombrir(hex, f) {
   return `rgb(${r},${g},${b})`;
 }
 
+// Variation déterministe par province (casse l'uniformité des couleurs)
+function hashProvince(id) {
+  return ((id * 2654435761) % 97) / 97;
+}
+
+// Sommets partagés entre un hexagone et son voisin (pour tracer les frontières)
+function areteVers(pts, cVoisin) {
+  const tri = pts
+    .map(pt => ({ pt, d: Math.hypot(pt[0] - cVoisin.x, pt[1] - cVoisin.y) }))
+    .sort((a, b) => a.d - b.d);
+  return [tri[0].pt, tri[1].pt];
+}
+
+const DECOR_TERRAIN = { foret: '🌲', montagne: '⛰️', desert: '🌵', colline: '🌿' };
+
+function tracerHex(ctx, pts) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < 6; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+}
+
 function dessiner() {
   const { ctx, canvas } = UI;
   const dpr = window.devicePixelRatio || 1;
+  const largeur = canvas.width / dpr, hauteur = canvas.height / dpr;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = '#1a2634';
-  ctx.fillRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+
+  // Fond océanique en dégradé
+  const fond = ctx.createLinearGradient(0, 0, 0, hauteur);
+  fond.addColorStop(0, '#0e1c2c');
+  fond.addColorStop(0.5, '#16324a');
+  fond.addColorStop(1, '#0c1826');
+  ctx.fillStyle = fond;
+  ctx.fillRect(0, 0, largeur, hauteur);
+
   ctx.translate(UI.cam.x, UI.cam.y);
   ctx.scale(UI.cam.zoom, UI.cam.zoom);
 
@@ -82,75 +112,177 @@ function dessiner() {
     }
   }
 
+  // ---- Passe 1 : eau (sous les terres) ----
   for (const p of G.provinces) {
+    if (p.terrain !== 'eau') continue;
     const c = hexCentre(p.col, p.row);
-    const pts = hexSommets(c.x, c.y, s - 1.5);
+    const pts = hexSommets(c.x, c.y, s + 0.5);
+    tracerHex(ctx, pts);
+    const h = hashProvince(p.id);
+    ctx.fillStyle = h < 0.33 ? '#2e5a7a' : h < 0.66 ? '#31607f' : '#2b5573';
+    ctx.fill();
+    // Petites vagues
+    if (h > 0.45) {
+      ctx.strokeStyle = '#ffffff18';
+      ctx.lineWidth = 1.5;
+      for (let w = 0; w < 2; w++) {
+        const wx = c.x + (h - 0.5) * s * 0.8 - 8 + w * 14;
+        const wy = c.y + (w - 0.5) * s * 0.5;
+        ctx.beginPath();
+        ctx.arc(wx, wy, 6, Math.PI * 0.15, Math.PI * 0.85);
+        ctx.stroke();
+      }
+    }
+  }
 
-    // Fond terrain
-    ctx.beginPath();
-    ctx.moveTo(pts[0][0], pts[0][1]);
-    for (let i = 1; i < 6; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-    ctx.closePath();
-    let base = TERRAINS[p.terrain].couleur;
-    ctx.fillStyle = base;
+  // ---- Passe 2 : terres ----
+  for (const p of G.provinces) {
+    if (p.terrain === 'eau') continue;
+    const c = hexCentre(p.col, p.row);
+    const pts = hexSommets(c.x, c.y, s - 0.5);
+    const h = hashProvince(p.id);
+
+    // Fond terrain avec variation de luminosité et léger dégradé vertical
+    tracerHex(ctx, pts);
+    const varia = 0.92 + h * 0.16;
+    const grad = ctx.createLinearGradient(c.x, c.y - s, c.x, c.y + s);
+    grad.addColorStop(0, assombrir(TERRAINS[p.terrain].couleur, Math.min(1.15, varia * 1.08)));
+    grad.addColorStop(1, assombrir(TERRAINS[p.terrain].couleur, varia * 0.82));
+    ctx.fillStyle = grad;
     ctx.fill();
 
     // Teinte du propriétaire
     if (p.proprietaire >= 0) {
-      ctx.fillStyle = nation(p.proprietaire).couleur + 'b8';
+      ctx.fillStyle = nation(p.proprietaire).couleur + '9c';
       ctx.fill();
-    } else if (p.terrain !== 'eau') {
-      ctx.fillStyle = '#00000030';
+    } else {
+      ctx.fillStyle = '#00000038';
       ctx.fill();
     }
 
-    // Bordure
-    if (UI.selection === p.id) {
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 4;
-    } else if (ciblesValides.has(p.id)) {
-      const hostile = p.proprietaire !== G.joueur;
-      ctx.strokeStyle = hostile ? '#ff5544' : '#66ddff';
-      ctx.lineWidth = 3;
-    } else {
-      ctx.strokeStyle = p.proprietaire >= 0 ? assombrir(nation(p.proprietaire).couleur, 0.6) : '#00000055';
-      ctx.lineWidth = 1.5;
-    }
+    // Relief pseudo-3D : arête claire en haut, sombre en bas
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#ffffff22';
+    ctx.beginPath();
+    ctx.moveTo(pts[3][0], pts[3][1]);
+    ctx.lineTo(pts[4][0], pts[4][1]);
+    ctx.lineTo(pts[5][0], pts[5][1]);
+    ctx.stroke();
+    ctx.strokeStyle = '#00000040';
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    ctx.lineTo(pts[1][0], pts[1][1]);
+    ctx.lineTo(pts[2][0], pts[2][1]);
     ctx.stroke();
 
-    if (p.terrain === 'eau') continue;
+    // Maillage discret
+    tracerHex(ctx, pts);
+    ctx.strokeStyle = '#00000030';
+    ctx.lineWidth = 1;
+    ctx.stroke();
 
-    // Icônes : capitale, fort
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    // Décoration de terrain (coin supérieur gauche)
+    const decor = DECOR_TERRAIN[p.terrain];
+    if (decor && UI.cam.zoom > 0.5) {
+      ctx.globalAlpha = 0.75;
+      ctx.font = `${s * 0.3}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(decor, c.x - s * 0.48, c.y - s * 0.3);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // ---- Passe 3 : côtes et frontières nationales ----
+  for (const p of G.provinces) {
+    if (p.terrain === 'eau') continue;
+    const c = hexCentre(p.col, p.row);
+    const pts = hexSommets(c.x, c.y, s - 0.5);
+    for (const vid of voisinsHex(p.col, p.row)) {
+      const v = G.provinces[vid];
+      const cv = hexCentre(v.col, v.row);
+      if (v.terrain === 'eau') {
+        // Côte : liseré sable
+        const [a, b] = areteVers(pts, cv);
+        ctx.strokeStyle = '#e8d9a066';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+      } else if (v.proprietaire !== p.proprietaire) {
+        // Frontière nationale épaisse
+        const [a, b] = areteVers(pts, cv);
+        ctx.strokeStyle = p.proprietaire >= 0 ? assombrir(nation(p.proprietaire).couleur, 1.35) : '#111a';
+        ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+      }
+    }
+    // Bordure extérieure de la carte (terre au bord — rare)
+  }
+
+  // ---- Passe 4 : surbrillances (cibles + sélection) ----
+  for (const pid of ciblesValides) {
+    const p = G.provinces[pid];
+    const c = hexCentre(p.col, p.row);
+    tracerHex(ctx, hexSommets(c.x, c.y, s - 3));
+    const hostile = p.proprietaire !== G.joueur;
+    ctx.strokeStyle = hostile ? '#ff5544' : '#66ddff';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([7, 5]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  if (selection) {
+    const c = hexCentre(selection.col, selection.row);
+    tracerHex(ctx, hexSommets(c.x, c.y, s - 2));
+    ctx.save();
+    ctx.shadowColor = '#ffffff';
+    ctx.shadowBlur = 14;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ---- Passe 5 : icônes, troupes, noms ----
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const p of G.provinces) {
+    if (p.terrain === 'eau') continue;
+    const c = hexCentre(p.col, p.row);
+
     let icones = '';
-    if (p.capitale) icones += '★';
+    if (p.capitale) icones += '👑';
     if (p.batiments.fort > 0) icones += '🏰';
     if (icones) {
-      ctx.font = `${s * 0.38}px sans-serif`;
-      ctx.fillStyle = '#ffe9a0';
-      ctx.fillText(icones, c.x, c.y - s * 0.42);
+      ctx.font = `${s * 0.36}px sans-serif`;
+      ctx.fillText(icones, c.x, c.y - s * 0.46);
     }
 
-    // Troupes
     if (p.troupes > 0) {
       const grise = p.proprietaire === G.joueur && p.aBouge;
+      ctx.save();
+      ctx.shadowColor = '#000000aa';
+      ctx.shadowBlur = 5;
+      ctx.shadowOffsetY = 1.5;
       ctx.beginPath();
-      ctx.arc(c.x, c.y + s * 0.1, s * 0.32, 0, Math.PI * 2);
-      ctx.fillStyle = grise ? '#555c66' : '#12181f';
+      ctx.arc(c.x, c.y + s * 0.08, s * 0.3, 0, Math.PI * 2);
+      ctx.fillStyle = grise ? '#4a525c' : '#141b24';
       ctx.fill();
+      ctx.restore();
       ctx.strokeStyle = p.proprietaire >= 0 ? nation(p.proprietaire).couleur : '#999';
       ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y + s * 0.08, s * 0.3, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.font = `bold ${s * 0.34}px sans-serif`;
-      ctx.fillStyle = grise ? '#aaa' : '#fff';
-      ctx.fillText(p.troupes, c.x, c.y + s * 0.12);
+      ctx.font = `bold ${s * 0.32}px sans-serif`;
+      ctx.fillStyle = grise ? '#9aa4ae' : '#ffffff';
+      ctx.fillText(p.troupes, c.x, c.y + s * 0.1);
     }
 
-    // Nom de la province (zoom suffisant)
     if (UI.cam.zoom > 0.75) {
-      ctx.font = `${s * 0.22}px sans-serif`;
-      ctx.fillStyle = '#ffffffcc';
+      ctx.font = `600 ${s * 0.2}px sans-serif`;
+      ctx.fillStyle = '#00000088';
+      ctx.fillText(p.nom, c.x + 0.8, c.y + s * 0.62 + 0.8);
+      ctx.fillStyle = '#ffffffdd';
       ctx.fillText(p.nom, c.x, c.y + s * 0.62);
     }
   }
