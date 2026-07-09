@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#1a2634">
+  <title>Chroniques des Ères — Grand Strategy Mobile</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚔️</text></svg>">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- Écran titre / choix de nation -->
+  <div id="ecran-titre"></div>
+
+  <!-- Écran de jeu -->
+  <div id="ecran-jeu" style="display:none">
+    <div id="barre-haut"></div>
+    <canvas id="carte"></canvas>
+
+    <!-- Panneau province (bas d'écran) -->
+    <div id="panneau-province"></div>
+
+    <!-- Barre d'actions -->
+    <div id="barre-bas">
+      <button class="btn-barre" onclick="ouvrirDiplomatie()">🕊️<span>Diplomatie</span></button>
+      <button class="btn-barre" onclick="ouvrirTechnologie()">🔬<span>Technologie</span></button>
+      <button class="btn-barre" onclick="ouvrirJournal()">📜<span>Chroniques</span></button>
+      <button class="btn-barre btn-fin-tour" onclick="uiFinDeTour()">⏭️<span>Fin du tour</span></button>
+    </div>
+  </div>
+
+  <!-- Modale générique -->
+  <div id="modale-fond"><div id="modale-contenu"></div></div>
+
+  <!-- Notifications -->
+  <div id="toast"></div>
+
+  <script src="js/data.js"></script>
+  <script src="js/game.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/ui.js"></script>
+</body>
+</html>
