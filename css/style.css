@@ -40,7 +40,10 @@ button { font-family: inherit; cursor: pointer; }
 
 /* ---------- Écran de jeu ---------- */
 #ecran-jeu { position: fixed; inset: 0; }
-#carte { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#carte {
+  position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none;
+  background: linear-gradient(180deg, #0e1c2c 0%, #16324a 50%, #0c1826 100%);
+}
 
 /* Barre du haut */
 #barre-haut {

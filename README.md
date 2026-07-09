@@ -32,8 +32,10 @@ La partie est **sauvegardée automatiquement** à chaque fin de tour (localStora
 
 ## 🛠️ Technique
 
-- HTML5 / Canvas / JavaScript vanilla, aucune dépendance.
+- HTML5 / JavaScript vanilla + **PixiJS 7** (rendu WebGL, embarqué localement — aucun CDN, aucun build).
+- PWA : installable sur l'écran d'accueil, jouable **hors-ligne** (service worker).
+- `js/lib/pixi.min.js` — moteur de rendu PixiJS.
 - `js/data.js` — terrains, ères, nations, bâtiments, événements.
 - `js/game.js` — moteur : carte, économie, combat, diplomatie, technologie, sauvegarde.
 - `js/ai.js` — IA des nations (utilité + personnalité).
-- `js/ui.js` — rendu canvas, gestes tactiles, panneaux et modales.
+- `js/ui.js` — scène PixiJS (couches, animations, particules), gestes tactiles, panneaux et modales.

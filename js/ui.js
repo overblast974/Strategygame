@@ -1,18 +1,27 @@
 // ============================================================
-// INTERFACE — rendu canvas (carte hexagonale), gestes tactiles,
-// panneaux, modales, notifications
+// INTERFACE — rendu WebGL (PixiJS), gestes tactiles,
+// panneaux, modales, notifications, effets visuels
 // ============================================================
 'use strict';
 
 const UI = {
-  canvas: null, ctx: null,
+  canvas: null,
+  app: null,            // PIXI.Application
+  monde: null,          // conteneur racine de la carte (caméra)
+  couches: {},          // conteneurs par couche
+  gfx: {},              // objets Graphics dynamiques
+  pool: { noms: new Map(), icones: new Map(), effectifs: new Map(), decor: new Map() },
+  particules: [],
   cam: { x: 0, y: 0, zoom: 1 },
+  shake: 0,
+  temps: 0,
+  nomsVisibles: true,
   hexSize: 42,
-  selection: -1,        // province sélectionnée
-  pointers: new Map(),  // gestion tactile
+  selection: -1,
+  pointers: new Map(),
   dragDist: 0,
   lastPinch: 0,
-  ecran: 'titre',       // 'titre' | 'jeu'
+  ecran: 'titre',
 };
 
 // ---------- Géométrie hexagonale ----------
@@ -52,11 +61,20 @@ function provinceSousPoint(px, py) {
   return best;
 }
 
-// ---------- Rendu ----------
+// ---------- Couleurs ----------
+function couleurNum(hex) { return parseInt(hex.slice(1), 16); }
+
+function assombrirNum(hex, f) {
+  const n = couleurNum(hex);
+  const r = Math.min(255, Math.floor(((n >> 16) & 255) * f));
+  const g = Math.min(255, Math.floor(((n >> 8) & 255) * f));
+  const b = Math.min(255, Math.floor((n & 255) * f));
+  return (r << 16) | (g << 8) | b;
+}
+
 function assombrir(hex, f) {
-  const n = parseInt(hex.slice(1), 16);
-  const r = Math.floor(((n >> 16) & 255) * f), g = Math.floor(((n >> 8) & 255) * f), b = Math.floor((n & 255) * f);
-  return `rgb(${r},${g},${b})`;
+  const n = assombrirNum(hex, f);
+  return '#' + n.toString(16).padStart(6, '0');
 }
 
 // Variation déterministe par province (casse l'uniformité des couleurs)
@@ -74,31 +92,135 @@ function areteVers(pts, cVoisin) {
 
 const DECOR_TERRAIN = { foret: '🌲', montagne: '⛰️', desert: '🌵', colline: '🌿' };
 
-function tracerHex(ctx, pts) {
-  ctx.beginPath();
-  ctx.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < 6; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-  ctx.closePath();
+// ---------- Initialisation PixiJS ----------
+function initPixi() {
+  UI.app = new PIXI.Application({
+    view: UI.canvas,
+    resizeTo: window,
+    antialias: true,
+    backgroundAlpha: 0,
+    resolution: Math.min(window.devicePixelRatio || 1, 2),
+    autoDensity: true,
+  });
+  UI.monde = new PIXI.Container();
+  UI.app.stage.addChild(UI.monde);
+
+  // Couches (ordre de dessin)
+  for (const nom of ['eau', 'vagues', 'terrain', 'politique', 'frontieres', 'decor',
+                     'surbrillance', 'unites', 'icones', 'noms', 'fx']) {
+    UI.couches[nom] = new PIXI.Container();
+    UI.monde.addChild(UI.couches[nom]);
+  }
+  // Graphics partagés
+  for (const nom of ['eau', 'vagues', 'terrain', 'politique', 'frontieres', 'cibles', 'selection', 'unites']) {
+    UI.gfx[nom] = new PIXI.Graphics();
+  }
+  UI.couches.eau.addChild(UI.gfx.eau);
+  UI.couches.vagues.addChild(UI.gfx.vagues);
+  UI.couches.terrain.addChild(UI.gfx.terrain);
+  UI.couches.politique.addChild(UI.gfx.politique);
+  UI.couches.frontieres.addChild(UI.gfx.frontieres);
+  UI.couches.surbrillance.addChild(UI.gfx.cibles);
+  UI.couches.surbrillance.addChild(UI.gfx.selection);
+  UI.couches.unites.addChild(UI.gfx.unites);
+
+  UI.app.ticker.add(() => tick());
 }
 
-function dessiner() {
-  const { ctx, canvas } = UI;
-  const dpr = window.devicePixelRatio || 1;
-  const largeur = canvas.width / dpr, hauteur = canvas.height / dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+function viderPools() {
+  for (const pool of Object.values(UI.pool)) {
+    for (const obj of pool.values()) obj.destroy();
+    pool.clear();
+  }
+  for (const p of UI.particules) p.gfx.destroy();
+  UI.particules = [];
+}
 
-  // Fond océanique en dégradé
-  const fond = ctx.createLinearGradient(0, 0, 0, hauteur);
-  fond.addColorStop(0, '#0e1c2c');
-  fond.addColorStop(0.5, '#16324a');
-  fond.addColorStop(1, '#0c1826');
-  ctx.fillStyle = fond;
-  ctx.fillRect(0, 0, largeur, hauteur);
-
-  ctx.translate(UI.cam.x, UI.cam.y);
-  ctx.scale(UI.cam.zoom, UI.cam.zoom);
-
+// Construit les couches statiques (terrain, eau, décorations, noms) — une fois par partie
+function construireCarteStatique() {
+  viderPools();
   const s = UI.hexSize;
+
+  const gEau = UI.gfx.eau; gEau.clear();
+  const gVagues = UI.gfx.vagues; gVagues.clear();
+  const gTerrain = UI.gfx.terrain; gTerrain.clear();
+
+  for (const p of G.provinces) {
+    const c = hexCentre(p.col, p.row);
+    const h = hashProvince(p.id);
+
+    if (p.terrain === 'eau') {
+      const pts = hexSommets(c.x, c.y, s + 0.5);
+      gEau.beginFill(h < 0.33 ? 0x2e5a7a : h < 0.66 ? 0x31607f : 0x2b5573);
+      gEau.drawPolygon(pts.flat());
+      gEau.endFill();
+      if (h > 0.45) {
+        gVagues.lineStyle(1.5, 0xffffff, 0.12);
+        for (let w = 0; w < 2; w++) {
+          const wx = c.x + (h - 0.5) * s * 0.8 - 8 + w * 14;
+          const wy = c.y + (w - 0.5) * s * 0.5;
+          const a0 = Math.PI * 0.15;
+          // moveTo au départ de l'arc, sinon Pixi trace une corde de liaison
+          gVagues.moveTo(wx + Math.cos(a0) * 6, wy + Math.sin(a0) * 6);
+          gVagues.arc(wx, wy, 6, a0, Math.PI * 0.85);
+        }
+        gVagues.lineStyle(0);
+      }
+      continue;
+    }
+
+    const pts = hexSommets(c.x, c.y, s - 0.5);
+    const varia = 0.92 + h * 0.16;
+    gTerrain.beginFill(assombrirNum(TERRAINS[p.terrain].couleur, varia));
+    gTerrain.drawPolygon(pts.flat());
+    gTerrain.endFill();
+    // Relief pseudo-3D : arête claire en haut, sombre en bas
+    gTerrain.lineStyle(2, 0xffffff, 0.13);
+    gTerrain.moveTo(pts[3][0], pts[3][1]);
+    gTerrain.lineTo(pts[4][0], pts[4][1]);
+    gTerrain.lineTo(pts[5][0], pts[5][1]);
+    gTerrain.lineStyle(2, 0x000000, 0.25);
+    gTerrain.moveTo(pts[0][0], pts[0][1]);
+    gTerrain.lineTo(pts[1][0], pts[1][1]);
+    gTerrain.lineTo(pts[2][0], pts[2][1]);
+    // Maillage discret
+    gTerrain.lineStyle(1, 0x000000, 0.19);
+    gTerrain.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < 6; i++) gTerrain.lineTo(pts[i][0], pts[i][1]);
+    gTerrain.closePath();
+    gTerrain.lineStyle(0);
+
+    // Décoration de terrain
+    const decor = DECOR_TERRAIN[p.terrain];
+    if (decor) {
+      const txt = new PIXI.Text(decor, { fontSize: s * 0.3 });
+      txt.anchor.set(0.5);
+      txt.alpha = 0.75;
+      txt.position.set(c.x - s * 0.48, c.y - s * 0.3);
+      UI.couches.decor.addChild(txt);
+      UI.pool.decor.set(p.id, txt);
+    }
+
+    // Nom de la province (ombre portée via style)
+    const nom = new PIXI.Text(p.nom, {
+      fontFamily: 'sans-serif', fontSize: s * 0.2, fontWeight: '600',
+      fill: 0xffffff, dropShadow: true, dropShadowDistance: 1,
+      dropShadowAlpha: 0.7, dropShadowBlur: 1,
+    });
+    nom.anchor.set(0.5);
+    nom.alpha = 0.85;
+    nom.position.set(c.x, c.y + s * 0.62);
+    UI.couches.noms.addChild(nom);
+    UI.pool.noms.set(p.id, nom);
+  }
+}
+
+// ---------- Mise à jour de la scène (état du jeu → affichage) ----------
+function dessiner() {
+  if (!UI.app || !G) return;
+  const s = UI.hexSize;
+
+  // Cibles valides depuis la sélection
   const selection = UI.selection >= 0 ? G.provinces[UI.selection] : null;
   const ciblesValides = new Set();
   if (selection && selection.proprietaire === G.joueur) {
@@ -112,179 +234,175 @@ function dessiner() {
     }
   }
 
-  // ---- Passe 1 : eau (sous les terres) ----
-  for (const p of G.provinces) {
-    if (p.terrain !== 'eau') continue;
-    const c = hexCentre(p.col, p.row);
-    const pts = hexSommets(c.x, c.y, s + 0.5);
-    tracerHex(ctx, pts);
-    const h = hashProvince(p.id);
-    ctx.fillStyle = h < 0.33 ? '#2e5a7a' : h < 0.66 ? '#31607f' : '#2b5573';
-    ctx.fill();
-    // Petites vagues
-    if (h > 0.45) {
-      ctx.strokeStyle = '#ffffff18';
-      ctx.lineWidth = 1.5;
-      for (let w = 0; w < 2; w++) {
-        const wx = c.x + (h - 0.5) * s * 0.8 - 8 + w * 14;
-        const wy = c.y + (w - 0.5) * s * 0.5;
-        ctx.beginPath();
-        ctx.arc(wx, wy, 6, Math.PI * 0.15, Math.PI * 0.85);
-        ctx.stroke();
-      }
-    }
-  }
+  const gPol = UI.gfx.politique; gPol.clear();
+  const gFro = UI.gfx.frontieres; gFro.clear();
+  const gCib = UI.gfx.cibles; gCib.clear();
+  const gSel = UI.gfx.selection; gSel.clear();
+  const gUni = UI.gfx.unites; gUni.clear();
 
-  // ---- Passe 2 : terres ----
   for (const p of G.provinces) {
     if (p.terrain === 'eau') continue;
     const c = hexCentre(p.col, p.row);
     const pts = hexSommets(c.x, c.y, s - 0.5);
-    const h = hashProvince(p.id);
 
-    // Fond terrain avec variation de luminosité et léger dégradé vertical
-    tracerHex(ctx, pts);
-    const varia = 0.92 + h * 0.16;
-    const grad = ctx.createLinearGradient(c.x, c.y - s, c.x, c.y + s);
-    grad.addColorStop(0, assombrir(TERRAINS[p.terrain].couleur, Math.min(1.15, varia * 1.08)));
-    grad.addColorStop(1, assombrir(TERRAINS[p.terrain].couleur, varia * 0.82));
-    ctx.fillStyle = grad;
-    ctx.fill();
-
-    // Teinte du propriétaire
+    // Teinte politique
     if (p.proprietaire >= 0) {
-      ctx.fillStyle = nation(p.proprietaire).couleur + '9c';
-      ctx.fill();
+      gPol.beginFill(couleurNum(nation(p.proprietaire).couleur), 0.61);
+      gPol.drawPolygon(pts.flat());
+      gPol.endFill();
     } else {
-      ctx.fillStyle = '#00000038';
-      ctx.fill();
+      gPol.beginFill(0x000000, 0.22);
+      gPol.drawPolygon(pts.flat());
+      gPol.endFill();
     }
 
-    // Relief pseudo-3D : arête claire en haut, sombre en bas
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = '#ffffff22';
-    ctx.beginPath();
-    ctx.moveTo(pts[3][0], pts[3][1]);
-    ctx.lineTo(pts[4][0], pts[4][1]);
-    ctx.lineTo(pts[5][0], pts[5][1]);
-    ctx.stroke();
-    ctx.strokeStyle = '#00000040';
-    ctx.beginPath();
-    ctx.moveTo(pts[0][0], pts[0][1]);
-    ctx.lineTo(pts[1][0], pts[1][1]);
-    ctx.lineTo(pts[2][0], pts[2][1]);
-    ctx.stroke();
-
-    // Maillage discret
-    tracerHex(ctx, pts);
-    ctx.strokeStyle = '#00000030';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    // Décoration de terrain (coin supérieur gauche)
-    const decor = DECOR_TERRAIN[p.terrain];
-    if (decor && UI.cam.zoom > 0.5) {
-      ctx.globalAlpha = 0.75;
-      ctx.font = `${s * 0.3}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(decor, c.x - s * 0.48, c.y - s * 0.3);
-      ctx.globalAlpha = 1;
-    }
-  }
-
-  // ---- Passe 3 : côtes et frontières nationales ----
-  for (const p of G.provinces) {
-    if (p.terrain === 'eau') continue;
-    const c = hexCentre(p.col, p.row);
-    const pts = hexSommets(c.x, c.y, s - 0.5);
+    // Côtes et frontières nationales
     for (const vid of voisinsHex(p.col, p.row)) {
       const v = G.provinces[vid];
       const cv = hexCentre(v.col, v.row);
       if (v.terrain === 'eau') {
-        // Côte : liseré sable
         const [a, b] = areteVers(pts, cv);
-        ctx.strokeStyle = '#e8d9a066';
-        ctx.lineWidth = 2.5;
-        ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+        gFro.lineStyle(2.5, 0xe8d9a0, 0.4);
+        gFro.moveTo(a[0], a[1]);
+        gFro.lineTo(b[0], b[1]);
       } else if (v.proprietaire !== p.proprietaire) {
-        // Frontière nationale épaisse
         const [a, b] = areteVers(pts, cv);
-        ctx.strokeStyle = p.proprietaire >= 0 ? assombrir(nation(p.proprietaire).couleur, 1.35) : '#111a';
-        ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+        const coul = p.proprietaire >= 0 ? assombrirNum(nation(p.proprietaire).couleur, 1.35) : 0x111111;
+        gFro.lineStyle(3, coul, p.proprietaire >= 0 ? 1 : 0.6);
+        gFro.moveTo(a[0], a[1]);
+        gFro.lineTo(b[0], b[1]);
       }
     }
-    // Bordure extérieure de la carte (terre au bord — rare)
-  }
+    gFro.lineStyle(0);
 
-  // ---- Passe 4 : surbrillances (cibles + sélection) ----
-  for (const pid of ciblesValides) {
-    const p = G.provinces[pid];
-    const c = hexCentre(p.col, p.row);
-    tracerHex(ctx, hexSommets(c.x, c.y, s - 3));
-    const hostile = p.proprietaire !== G.joueur;
-    ctx.strokeStyle = hostile ? '#ff5544' : '#66ddff';
-    ctx.lineWidth = 3;
-    ctx.setLineDash([7, 5]);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-  if (selection) {
-    const c = hexCentre(selection.col, selection.row);
-    tracerHex(ctx, hexSommets(c.x, c.y, s - 2));
-    ctx.save();
-    ctx.shadowColor = '#ffffff';
-    ctx.shadowBlur = 14;
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 3.5;
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  // ---- Passe 5 : icônes, troupes, noms ----
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  for (const p of G.provinces) {
-    if (p.terrain === 'eau') continue;
-    const c = hexCentre(p.col, p.row);
-
+    // Icônes capitale / forteresse (pool)
     let icones = '';
     if (p.capitale) icones += '👑';
     if (p.batiments.fort > 0) icones += '🏰';
+    let icoTxt = UI.pool.icones.get(p.id);
     if (icones) {
-      ctx.font = `${s * 0.36}px sans-serif`;
-      ctx.fillText(icones, c.x, c.y - s * 0.46);
+      if (!icoTxt) {
+        icoTxt = new PIXI.Text('', { fontSize: s * 0.36 });
+        icoTxt.anchor.set(0.5);
+        icoTxt.position.set(c.x, c.y - s * 0.46);
+        UI.couches.icones.addChild(icoTxt);
+        UI.pool.icones.set(p.id, icoTxt);
+      }
+      icoTxt.text = icones;
+      icoTxt.visible = true;
+    } else if (icoTxt) {
+      icoTxt.visible = false;
     }
 
+    // Pions de troupes
+    let effTxt = UI.pool.effectifs.get(p.id);
     if (p.troupes > 0) {
       const grise = p.proprietaire === G.joueur && p.aBouge;
-      ctx.save();
-      ctx.shadowColor = '#000000aa';
-      ctx.shadowBlur = 5;
-      ctx.shadowOffsetY = 1.5;
-      ctx.beginPath();
-      ctx.arc(c.x, c.y + s * 0.08, s * 0.3, 0, Math.PI * 2);
-      ctx.fillStyle = grise ? '#4a525c' : '#141b24';
-      ctx.fill();
-      ctx.restore();
-      ctx.strokeStyle = p.proprietaire >= 0 ? nation(p.proprietaire).couleur : '#999';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(c.x, c.y + s * 0.08, s * 0.3, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.font = `bold ${s * 0.32}px sans-serif`;
-      ctx.fillStyle = grise ? '#9aa4ae' : '#ffffff';
-      ctx.fillText(p.troupes, c.x, c.y + s * 0.1);
+      gUni.lineStyle(2, p.proprietaire >= 0 ? couleurNum(nation(p.proprietaire).couleur) : 0x999999);
+      gUni.beginFill(grise ? 0x4a525c : 0x141b24);
+      gUni.drawCircle(c.x, c.y + s * 0.08, s * 0.3);
+      gUni.endFill();
+      gUni.lineStyle(0);
+      if (!effTxt) {
+        effTxt = new PIXI.Text('', {
+          fontFamily: 'sans-serif', fontSize: s * 0.32, fontWeight: 'bold', fill: 0xffffff,
+        });
+        effTxt.anchor.set(0.5);
+        effTxt.position.set(c.x, c.y + s * 0.1);
+        UI.couches.unites.addChild(effTxt);
+        UI.pool.effectifs.set(p.id, effTxt);
+      }
+      effTxt.text = String(p.troupes);
+      effTxt.style.fill = grise ? 0x9aa4ae : 0xffffff;
+      effTxt.visible = true;
+    } else if (effTxt) {
+      effTxt.visible = false;
     }
+  }
 
-    if (UI.cam.zoom > 0.75) {
-      ctx.font = `600 ${s * 0.2}px sans-serif`;
-      ctx.fillStyle = '#00000088';
-      ctx.fillText(p.nom, c.x + 0.8, c.y + s * 0.62 + 0.8);
-      ctx.fillStyle = '#ffffffdd';
-      ctx.fillText(p.nom, c.x, c.y + s * 0.62);
+  // Surbrillance des cibles (pulse animé dans tick)
+  for (const pid of ciblesValides) {
+    const p = G.provinces[pid];
+    const c = hexCentre(p.col, p.row);
+    const hostile = p.proprietaire !== G.joueur;
+    gCib.lineStyle(3, hostile ? 0xff5544 : 0x66ddff, 1);
+    gCib.drawPolygon(hexSommets(c.x, c.y, s - 3).flat());
+    gCib.lineStyle(0);
+  }
+
+  // Sélection (halo + trait, pulse dans tick)
+  if (selection) {
+    const c = hexCentre(selection.col, selection.row);
+    gSel.lineStyle(9, 0xffffff, 0.25);
+    gSel.drawPolygon(hexSommets(c.x, c.y, s - 2).flat());
+    gSel.lineStyle(3.5, 0xffffff, 1);
+    gSel.drawPolygon(hexSommets(c.x, c.y, s - 2).flat());
+    gSel.lineStyle(0);
+  }
+}
+
+// ---------- Boucle d'animation ----------
+function tick() {
+  if (!UI.app) return;
+  const dms = UI.app.ticker.deltaMS;
+  UI.temps += dms / 1000;
+
+  // Caméra + tremblement d'écran
+  let sx = 0, sy = 0;
+  if (UI.shake > 0.3) {
+    sx = (Math.random() - 0.5) * UI.shake;
+    sy = (Math.random() - 0.5) * UI.shake;
+    UI.shake *= Math.pow(0.86, dms / 16.7);
+  } else {
+    UI.shake = 0;
+  }
+  UI.monde.position.set(UI.cam.x + sx, UI.cam.y + sy);
+  UI.monde.scale.set(UI.cam.zoom);
+
+  // Pulsations
+  UI.gfx.selection.alpha = 0.65 + 0.35 * Math.sin(UI.temps * 5);
+  UI.gfx.cibles.alpha = 0.55 + 0.45 * Math.sin(UI.temps * 4);
+  UI.gfx.vagues.alpha = 0.5 + 0.5 * Math.sin(UI.temps * 1.2);
+
+  // Noms visibles selon le zoom
+  const voulu = UI.cam.zoom > 0.75;
+  if (voulu !== UI.nomsVisibles) {
+    UI.nomsVisibles = voulu;
+    UI.couches.noms.visible = voulu;
+  }
+
+  // Particules
+  if (UI.particules.length) {
+    for (let i = UI.particules.length - 1; i >= 0; i--) {
+      const pa = UI.particules[i];
+      pa.vie -= dms / 1000;
+      pa.gfx.x += pa.vx * dms / 1000;
+      pa.gfx.y += pa.vy * dms / 1000;
+      pa.vy += 60 * dms / 1000;
+      pa.gfx.alpha = Math.max(0, pa.vie / pa.vieMax);
+      if (pa.vie <= 0) {
+        pa.gfx.destroy();
+        UI.particules.splice(i, 1);
+      }
     }
+  }
+}
+
+// Explosion de particules (bataille)
+function fxExplosion(x, y, couleur, nombre = 16) {
+  for (let i = 0; i < nombre; i++) {
+    const g = new PIXI.Graphics();
+    g.beginFill(couleur, 1);
+    g.drawCircle(0, 0, 1.5 + Math.random() * 2.5);
+    g.endFill();
+    g.position.set(x, y);
+    UI.couches.fx.addChild(g);
+    const a = Math.random() * Math.PI * 2;
+    const v = 40 + Math.random() * 140;
+    UI.particules.push({
+      gfx: g, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 40,
+      vie: 0.5 + Math.random() * 0.4, vieMax: 0.9,
+    });
   }
 }
 
@@ -312,7 +430,6 @@ function initGestes() {
       UI.dragDist += Math.abs(dx) + Math.abs(dy);
       UI.cam.x += dx;
       UI.cam.y += dy;
-      dessiner();
     } else if (UI.pointers.size === 2) {
       const [a, b] = [...UI.pointers.values()];
       const d = Math.hypot(a.x - b.x, a.y - b.y);
@@ -347,17 +464,15 @@ function zoomVers(px, py, facteur) {
   UI.cam.zoom = clamp(UI.cam.zoom * facteur, 0.35, 2.5);
   UI.cam.x = px - avant.x * UI.cam.zoom;
   UI.cam.y = py - avant.y * UI.cam.zoom;
-  dessiner();
 }
 
 function centrerSurJoueur() {
   const cap = provincesDe(G.joueur).find(p => p.capitale) || provincesDe(G.joueur)[0];
   if (!cap) return;
   const c = hexCentre(cap.col, cap.row);
-  const dpr = window.devicePixelRatio || 1;
   UI.cam.zoom = 0.8;
-  UI.cam.x = UI.canvas.width / dpr / 2 - c.x;
-  UI.cam.y = UI.canvas.height / dpr / 2 - c.y;
+  UI.cam.x = UI.app.screen.width / 2 - c.x * UI.cam.zoom;
+  UI.cam.y = UI.app.screen.height / 2 - c.y * UI.cam.zoom;
 }
 
 // ---------- Interaction : tap sur la carte ----------
@@ -506,6 +621,9 @@ function ouvrirAttaque(source, cible) {
 
   UI._attaque = () => {
     const r = resoudreAttaque(source, cible);
+    const centre = hexCentre(c.col, c.row);
+    fxExplosion(centre.x, centre.y, r.victoire ? 0xffd75e : 0xff5544, r.victoire ? 22 : 14);
+    UI.shake = r.victoire ? 7 : 11;
     toast(r.victoire ? `🎉 Victoire ! ${c.nom} est à vous (−${r.pertes} pertes).` : `💥 Défaite… ${r.pertes} soldats perdus.`);
     deselectionner();
     majTout();
@@ -799,26 +917,18 @@ function lancerJeu() {
   UI.ecran = 'jeu';
   document.getElementById('ecran-titre').style.display = 'none';
   document.getElementById('ecran-jeu').style.display = 'block';
-  redimensionner();
+  UI.app.resize();
+  construireCarteStatique();
   centrerSurJoueur();
   majTout();
   toast(`Bienvenue, souverain de ${nation(G.joueur).nom} ! Touchez vos provinces pour agir.`);
 }
 
 // ---------- Initialisation ----------
-function redimensionner() {
-  const cv = UI.canvas;
-  const dpr = window.devicePixelRatio || 1;
-  cv.width = cv.clientWidth * dpr;
-  cv.height = cv.clientHeight * dpr;
-  if (UI.ecran === 'jeu' && G) dessiner();
-}
-
 window.addEventListener('DOMContentLoaded', () => {
   UI.canvas = document.getElementById('carte');
-  UI.ctx = UI.canvas.getContext('2d');
+  initPixi();
   initGestes();
-  window.addEventListener('resize', redimensionner);
   document.getElementById('modale-fond').addEventListener('pointerdown', e => {
     if (e.target.id === 'modale-fond') fermerModale();
   });
