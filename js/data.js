@@ -94,24 +94,51 @@ const TOURS_ROTATION_MERCENAIRES = 6; // renouvellement des compagnies
 const NB_CITES_ETATS = 7;
 const NOMS_CITES = ['Vénara', 'Ashkelon', 'Tyrshan', 'Novgard', 'Qadesh', 'Palmyre', 'Byzance', 'Cartha', 'Ilion', 'Samarkande'];
 
-// Coûts en matériaux : bois pour tout bâtiment, pierre en plus pour les forts
+// Bâtiments. type : 'commun' (partout), 'cotier' (bord de mer),
+// 'extraction' (exige le gisement correspondant dans la province).
 const BATIMENTS = {
-  ferme:  { nom: 'Ferme',        icone: '🌾', effet: 'nourriture',  bonus: 3, coutBase: 40, bois: 8,  pierre: 0 },
-  marche: { nom: 'Marché',       icone: '💰', effet: 'or',          bonus: 3, coutBase: 50, bois: 8,  pierre: 0 },
-  ecole:  { nom: 'Académie',     icone: '📚', effet: 'science',     bonus: 3, coutBase: 60, bois: 10, pierre: 0 },
-  fort:   { nom: 'Forteresse',   icone: '🏰', effet: 'defense',     bonus: 0.35, coutBase: 70, bois: 6, pierre: 12 },
-  exploitation: { nom: 'Exploitation', icone: '⚒️', effet: 'marchandise', bonus: 2, coutBase: 45, bois: 6, pierre: 0 },
+  ferme:      { nom: 'Ferme',       icone: '🌾', type: 'commun',     bonus: 3,    coutBase: 40, bois: 8,  pierre: 0 },
+  marche:     { nom: 'Marché',      icone: '💰', type: 'commun',     bonus: 3,    coutBase: 50, bois: 8,  pierre: 0 },
+  ecole:      { nom: 'Académie',    icone: '📚', type: 'commun',     bonus: 3,    coutBase: 60, bois: 10, pierre: 0 },
+  fort:       { nom: 'Forteresse',  icone: '🏰', type: 'commun',     bonus: 0.35, coutBase: 70, bois: 6,  pierre: 12 },
+  port:       { nom: 'Port',        icone: '⚓', type: 'cotier',     bonus: 2,    coutBase: 55, bois: 14, pierre: 4 },
+  scierie:    { nom: 'Scierie',     icone: '🪵', type: 'extraction', bien: 'bois',   bonus: 2, coutBase: 45, bois: 4,  pierre: 4 },
+  mine_fer:   { nom: 'Mine de fer', icone: '⚒️', type: 'extraction', bien: 'fer',    bonus: 2, coutBase: 50, bois: 8,  pierre: 4 },
+  carriere:   { nom: 'Carrière',    icone: '🪨', type: 'extraction', bien: 'pierre', bonus: 2, coutBase: 45, bois: 8,  pierre: 0 },
+  plantation: { nom: 'Plantation',  icone: '🌶️', type: 'extraction', bien: 'epices', bonus: 2, coutBase: 50, bois: 8,  pierre: 0 },
+  mine_or:    { nom: 'Mine d\'or',  icone: '🪙', type: 'extraction', bien: 'or',     bonus: 3, coutBase: 65, bois: 8,  pierre: 6 },
 };
 const NIVEAU_MAX_BATIMENT = 3;
+const EMPLACEMENTS_PROVINCE = 4;   // bâtiments différents max par province (+1 en capitale)
 
 // Noms d'ères pour les bâtiments (affichage évolutif)
 const NOMS_BATIMENTS_PAR_ERE = {
-  ferme:  ['Ferme', 'Domaine agricole', 'Exploitation mécanisée', 'Agro-complexe', 'Ferme hydroponique'],
-  marche: ['Marché', 'Comptoir', 'Bourse', 'Centre financier', 'Nexus commercial'],
-  ecole:  ['Monastère', 'Université', 'Institut', 'Laboratoire', 'Centre quantique'],
-  fort:   ['Forteresse', 'Citadelle', 'Bastion', 'Base militaire', 'Bouclier orbital'],
-  exploitation: ['Atelier', 'Manufacture', 'Usine', 'Complexe industriel', 'Nano-fabrique'],
+  ferme:      ['Ferme', 'Domaine agricole', 'Exploitation mécanisée', 'Agro-complexe', 'Ferme hydroponique'],
+  marche:     ['Marché', 'Comptoir', 'Bourse', 'Centre financier', 'Nexus commercial'],
+  ecole:      ['Monastère', 'Université', 'Institut', 'Laboratoire', 'Centre quantique'],
+  fort:       ['Forteresse', 'Citadelle', 'Bastion', 'Base militaire', 'Bouclier orbital'],
+  port:       ['Port', 'Port marchand', 'Docks industriels', 'Terminal portuaire', 'Spatioport'],
+  scierie:    ['Scierie', 'Atelier du bois', 'Scierie à vapeur', 'Complexe forestier', 'Synthé-bois'],
+  mine_fer:   ['Mine de fer', 'Fonderie', 'Aciérie', 'Complexe sidérurgique', 'Forge à plasma'],
+  carriere:   ['Carrière', 'Carrière taillée', 'Carrière mécanisée', 'Excavatrice géante', 'Foreuse quantique'],
+  plantation: ['Plantation', 'Caravansérail', 'Comptoir des épices', 'Agro-tropicale', 'Bio-dôme'],
+  mine_or:    ['Mine d\'or', 'Orpaillage royal', 'Mine profonde', 'Extraction chimique', 'Collecteur d\'astéroïdes'],
 };
+
+// Gisements possibles par terrain : [bien, probabilité]
+// 'or' est un gisement spécial : la mine d'or produit de l'or directement.
+const GISEMENTS_PAR_TERRAIN = {
+  plaine:   [['bois', 0.25], ['epices', 0.15]],
+  foret:    [['bois', 1.0], ['pierre', 0.2]],
+  colline:  [['pierre', 0.7], ['fer', 0.35], ['or', 0.15]],
+  montagne: [['fer', 0.8], ['pierre', 0.5], ['or', 0.25]],
+  desert:   [['epices', 0.7], ['or', 0.2]],
+  toundra:  [['bois', 0.4], ['fer', 0.25]],
+};
+const ICONES_GISEMENTS = { bois: '🪵', fer: '⚒️', pierre: '🪨', epices: '🌶️', or: '🪙' };
+
+// Bâtiment d'extraction correspondant à chaque gisement
+const BATIMENT_POUR_GISEMENT = { bois: 'scierie', fer: 'mine_fer', pierre: 'carriere', epices: 'plantation', or: 'mine_or' };
 
 // ---- Événements à choix (style Crusader Kings) ----
 // effets: { or, nourriture, science, stabilite, troupes (province aléatoire), relationsTous }

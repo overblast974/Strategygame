@@ -116,20 +116,33 @@ function iaDiplomatie(nid, perso) {
 function iaConstruire(nid, perso, miennes) {
   const n = nation(nid);
   let budget = n.or * 0.5;
-  const priorites = [];
-  if (perso.science > 0.5) priorites.push('ecole');
-  if (perso.commerce > 0.5) priorites.push('marche');
-  priorites.push('ferme', 'marche', 'fort', 'ecole');
 
-  for (let essais = 0; essais < 3 && budget > 40; essais++) {
-    const type = priorites[rand(priorites.length)];
-    const candidates = miennes.filter(p => p.batiments[type] < NIVEAU_MAX_BATIMENT);
-    if (!candidates.length) continue;
-    const p = pick(candidates);
-    const cout = coutBatiment(type, p.batiments[type], n.ere);
+  for (let essais = 0; essais < 4 && budget > 40; essais++) {
+    const p = pick(miennes);
+    // Options valides dans cette province, pondérées par la personnalité
+    const options = [];
+    for (const [type, def] of Object.entries(BATIMENTS)) {
+      if (p.batiments[type] >= NIVEAU_MAX_BATIMENT) continue;
+      if (!peutConstruire(p, type).ok) continue;
+      let poids = 1;
+      if (def.type === 'extraction') poids = 3;                      // exploiter ses gisements d'abord
+      if (type === 'ferme' && p.pop >= capaciteProvince(p) - 1) poids = 3; // débloquer la croissance
+      if (type === 'port') poids = 1 + perso.commerce * 2;
+      if (type === 'marche' || type === 'mine_or') poids *= 1 + perso.commerce;
+      if (type === 'ecole') poids *= 1 + perso.science;
+      if (type === 'fort') poids *= 0.5 + perso.agression;
+      if (type === 'mine_fer') poids *= 1 + perso.agression;         // l'industrie de guerre
+      options.push({ type, poids });
+    }
+    if (!options.length) continue;
+    // Tirage pondéré
+    const total = options.reduce((s, o) => s + o.poids, 0);
+    let tirage = Math.random() * total;
+    let choix = options[0].type;
+    for (const o of options) { tirage -= o.poids; if (tirage <= 0) { choix = o.type; break; } }
+    const cout = coutBatiment(choix, p.batiments[choix], n.ere);
     if (cout <= budget && n.or >= cout) {
-      construire(p.id, type);
-      budget -= cout;
+      if (construire(p.id, choix).ok) budget -= cout;
     }
   }
 }

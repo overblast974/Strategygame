@@ -106,15 +106,16 @@ function initPixi() {
   UI.app.stage.addChild(UI.monde);
 
   // Couches (ordre de dessin)
-  for (const nom of ['eau', 'vagues', 'terrain', 'politique', 'frontieres', 'decor',
+  for (const nom of ['eau', 'vagues', 'terrain', 'politique', 'frontieres', 'routes', 'decor',
                      'surbrillance', 'unites', 'icones', 'noms', 'fx']) {
     UI.couches[nom] = new PIXI.Container();
     UI.monde.addChild(UI.couches[nom]);
   }
   // Graphics partagés
-  for (const nom of ['eau', 'vagues', 'terrain', 'politique', 'frontieres', 'cibles', 'selection', 'unites']) {
+  for (const nom of ['eau', 'vagues', 'terrain', 'politique', 'frontieres', 'routes', 'cibles', 'selection', 'unites']) {
     UI.gfx[nom] = new PIXI.Graphics();
   }
+  UI.couches.routes.addChild(UI.gfx.routes);
   UI.couches.eau.addChild(UI.gfx.eau);
   UI.couches.vagues.addChild(UI.gfx.vagues);
   UI.couches.terrain.addChild(UI.gfx.terrain);
@@ -280,11 +281,12 @@ function dessiner() {
     }
     gFro.lineStyle(0);
 
-    // Icônes capitale / cité-état / forteresse (pool)
+    // Icônes capitale / cité-état / forteresse / port (pool)
     let icones = '';
     if (p.capitale) icones += '👑';
     if (p.citeEtat) icones += '🏛️';
     if (p.batiments.fort > 0 && !p.citeEtat) icones += '🏰';
+    if (p.batiments.port > 0) icones += '⚓';
     let icoTxt = UI.pool.icones.get(p.id);
     if (icones) {
       if (!icoTxt) {
@@ -323,6 +325,32 @@ function dessiner() {
       effTxt.visible = true;
     } else if (effTxt) {
       effTxt.visible = false;
+    }
+  }
+
+  // Routes commerciales maritimes du joueur (pointillés entre ports partenaires)
+  const gRoutes = UI.gfx.routes; gRoutes.clear();
+  const mesPorts = provincesDe(G.joueur).filter(pp => pp.batiments.port > 0);
+  if (mesPorts.length > 0) {
+    const monPort = hexCentre(mesPorts[0].col, mesPorts[0].row);
+    for (const pid of nation(G.joueur).accords) {
+      const partenaire = nation(pid);
+      if (!partenaire.vivante) continue;
+      const sesPorts = provincesDe(pid).filter(pp => pp.batiments.port > 0);
+      if (!sesPorts.length) continue;
+      const sonPort = hexCentre(sesPorts[0].col, sesPorts[0].row);
+      // Ligne pointillée segmentée : halo doré + cœur à la couleur du partenaire
+      const dist = Math.hypot(sonPort.x - monPort.x, sonPort.y - monPort.y);
+      const pas = 16, nSeg = Math.max(2, Math.floor(dist / pas));
+      for (const [larg, coul, alpha] of [[6, 0xffe9a0, 0.5], [3, couleurNum(partenaire.couleur), 1]]) {
+        gRoutes.lineStyle(larg, coul, alpha);
+        for (let i = 0; i < nSeg; i += 2) {
+          const t1 = i / nSeg, t2 = Math.min(1, (i + 1) / nSeg);
+          gRoutes.moveTo(monPort.x + (sonPort.x - monPort.x) * t1, monPort.y + (sonPort.y - monPort.y) * t1);
+          gRoutes.lineTo(monPort.x + (sonPort.x - monPort.x) * t2, monPort.y + (sonPort.y - monPort.y) * t2);
+        }
+      }
+      gRoutes.lineStyle(0);
     }
   }
 
@@ -537,8 +565,8 @@ function afficherPanneauProvince(pid) {
   const monTour = p.proprietaire === G.joueur;
   const ere = n ? n.ere : 0;
 
-  const bien = TERRAIN_BIEN[p.terrain];
-  const prodBien = bien ? 2 + p.batiments.exploitation * BATIMENTS.exploitation.bonus : 0;
+  const gisements = p.gisements.map(g => ICONES_GISEMENTS[g]).join(' ');
+  const rendement = Math.round(facteurTravail(p) * 100);
   let html = `<div class="pp-titre">
     <span class="pastille" style="background:${n ? n.couleur : '#777'}"></span>
     <b>${p.nom}</b> ${p.capitale ? '★' : ''}
@@ -546,10 +574,8 @@ function afficherPanneauProvince(pid) {
     <button class="fermer" onclick="deselectionner()">✕</button>
   </div>
   <div class="pp-stats">
-    <span>🌾 ${t.nourriture + p.batiments.ferme * 3}</span>
-    <span>💰 ${t.or + p.batiments.marche * 3}</span>
-    <span>🔬 ${t.science + p.batiments.ecole * 3}</span>
-    ${bien ? `<span>${MARCHANDISES[bien].icone} ${prodBien}</span>` : ''}
+    <span>👥 ${p.pop}/${capaciteProvince(p)} <small>(${rendement}%)</small></span>
+    ${gisements ? `<span>Gisements : ${gisements}</span>` : '<span>Aucun gisement</span>'}
     <span>🛡️ ×${(t.defense * (1 + p.batiments.fort * BATIMENTS.fort.bonus)).toFixed(1)}</span>
     <span>⚔️ ${p.troupes} (${TYPES_UNITES.inf.icone}${p.armee.inf} ${TYPES_UNITES.choc.icone}${p.armee.choc} ${TYPES_UNITES.siege.icone}${p.armee.siege})${monTour && p.aBouge ? ' · a agi' : ''}</span>
   </div>`;
@@ -559,25 +585,43 @@ function afficherPanneauProvince(pid) {
     html += `<div class="pp-recrues">`;
     for (const [type, def] of Object.entries(TYPES_UNITES)) {
       const c = def.cout;
-      const couts = `${c.or}💰 ${c.nourriture}🌾${c.fer ? ` ${c.fer}⚒️` : ''}${c.pierre ? ` ${c.pierre}🪨` : ''}`;
+      const couts = `1👥 ${c.or}💰 ${c.nourriture}🌾${c.fer ? ` ${c.fer}⚒️` : ''}${c.pierre ? ` ${c.pierre}🪨` : ''}`;
       html += `<div class="ligne-recrue">
-        <div class="lr-info"><b>${def.icone} ${def.noms[moi.ere]}</b><small>${couts}</small></div>
+        <div class="lr-info"><b>${def.icone} ${def.noms[moi.ere]}</b><small>${couts} par unité</small></div>
         <button class="btn btn-mini" onclick="uiRecruter(${pid},'${type}',1)">+1</button>
         <button class="btn btn-mini" onclick="uiRecruter(${pid},'${type}',5)">+5</button>
       </div>`;
     }
-    html += `</div><div class="pp-batiments">`;
+    html += `</div>`;
+    // Actions spéciales : démobilisation, transport naval
+    let actions = '';
+    if (p.troupes > 1) {
+      actions += `<button class="btn" onclick="uiDemobiliser(${pid})">🏳️ Démobiliser 5 <small>→ +👥</small></button>`;
+    }
+    if (p.batiments.port > 0 && p.troupes > 1 && !p.aBouge) {
+      actions += `<button class="btn" onclick="ouvrirTransportNaval(${pid})">🚢 Transport naval</button>`;
+    }
+    if (actions) html += `<div class="pp-actions">${actions}</div>`;
+
+    // Bâtiments : seuls les constructibles ici sont proposés
+    html += `<div class="pp-emplacements">🏗️ Emplacements : ${emplacementsUtilises(p)}/${emplacementsMax(p)}</div>
+    <div class="pp-batiments">`;
     for (const [type, def] of Object.entries(BATIMENTS)) {
-      if (type === 'exploitation' && !bien) continue;
       const niv = p.batiments[type];
       const nomEre = NOMS_BATIMENTS_PAR_ERE[type][ere];
+      // Masquer les bâtiments impossibles ici (mauvais terrain / pas de gisement)
+      if (niv === 0) {
+        if (def.type === 'cotier' && !estCotiere(p)) continue;
+        if (def.type === 'extraction' && !p.gisements.includes(def.bien)) continue;
+      }
       if (niv >= NIVEAU_MAX_BATIMENT) {
         html += `<button class="btn btn-bat" disabled>${def.icone} ${nomEre}<br><small>MAX (${niv})</small></button>`;
       } else {
         const cout = coutBatiment(type, niv, moi.ere);
         const mat = coutMateriaux(type, niv);
-        const couts = `${cout}💰${mat.bois ? ` ${mat.bois}🪵` : ''}${mat.pierre ? ` ${mat.pierre}🪨` : ''}`;
-        html += `<button class="btn btn-bat" onclick="uiConstruire(${pid},'${type}')">${def.icone} ${nomEre} ${niv > 0 ? 'niv.' + (niv + 1) : ''}<br><small>${couts}</small></button>`;
+        const plein = niv === 0 && emplacementsUtilises(p) >= emplacementsMax(p);
+        const couts = plein ? 'emplacements pleins' : `${cout}💰${mat.bois ? ` ${mat.bois}🪵` : ''}${mat.pierre ? ` ${mat.pierre}🪨` : ''}`;
+        html += `<button class="btn btn-bat" ${plein ? 'disabled' : ''} onclick="uiConstruire(${pid},'${type}')">${def.icone} ${nomEre} ${niv > 0 ? 'niv.' + (niv + 1) : ''}<br><small>${couts}</small></button>`;
       }
     }
     html += `</div><div class="pp-aide">Touchez une case voisine : la vôtre = déplacer · ennemie = attaquer</div>`;
@@ -615,6 +659,42 @@ function uiRecruter(pid, type, q) {
   if (!r.ok) toast(r.raison);
   majTout();
   afficherPanneauProvince(pid);
+}
+
+function uiDemobiliser(pid) {
+  const r = demobiliser(pid, 5);
+  if (!r.ok) toast(r.raison);
+  else toast(`🏳️ ${r.rendus} soldats rendus à la vie civile.`);
+  majTout();
+  afficherPanneauProvince(pid);
+}
+
+// Choisir le port de destination pour un transport naval
+function ouvrirTransportNaval(pid) {
+  const p = G.provinces[pid];
+  const destinations = provincesDe(G.joueur).filter(d => d.id !== pid && d.batiments.port > 0);
+  if (!destinations.length) {
+    toast('Aucun autre port : construisez-en un second.');
+    return;
+  }
+  let boutons = '';
+  for (const d of destinations) {
+    boutons += `<button class="btn btn-choix" onclick="uiTransporter(${pid},${d.id})">⚓ ${d.nom}<br><small>${d.troupes} troupes sur place</small></button>`;
+  }
+  ouvrirModale(`<h2>🚢 Transport naval depuis ${p.nom}</h2>
+    <p>Embarquer <b>${p.troupes - 1}</b> troupes (1 reste en garnison) vers l'un de vos ports :</p>
+    <div class="colonne-btn">${boutons}</div>
+    <div class="rangee-btn"><button class="btn" onclick="fermerModale()">Annuler</button></div>`);
+}
+
+function uiTransporter(source, cible) {
+  const s = G.provinces[source];
+  const r = transporterTroupes(source, cible, s.troupes - 1);
+  if (!r.ok) toast(r.raison || 'Impossible');
+  else toast(`🚢 Troupes débarquées à ${G.provinces[cible].nom} !`);
+  fermerModale();
+  deselectionner();
+  majTout();
 }
 
 function uiConstruire(pid, type) {
@@ -821,8 +901,9 @@ function ouvrirCommerce() {
     </div>`;
   });
   html += `<p style="margin-top:6px"><small>Les compagnies changent tous les ${TOURS_ROTATION_MERCENAIRES} tours. Vos rivaux peuvent aussi les engager…</small></p>
-    <p style="margin-top:10px"><small>💱 Accords commerciaux actifs : ${moi.accords.filter(a => nation(a).vivante).length}
-    (+${revenus(G.joueur).commerce || 0} 💰/tour) — négociez-en via la Diplomatie.<br>
+    <p style="margin-top:10px"><small>💱 Accords commerciaux : ${moi.accords.filter(a => nation(a).vivante).length}
+    · ⚓ Routes maritimes : ${revenus(G.joueur).routesMaritimes || 0} (+5 💰/tour chacune, il faut un port des deux côtés)
+    · total commerce : +${revenus(G.joueur).commerce || 0} 💰/tour<br>
     ⚒️ Le fer équipe vos unités · 🪵 le bois et 🪨 la pierre servent aux bâtiments · 🌶️ les épices font la fête.</small></p>
     <div class="rangee-btn"><button class="btn" onclick="fermerModale()">Fermer</button></div>`;
   ouvrirModale(html);
@@ -987,7 +1068,53 @@ function majBarre() {
     <span title="Nourriture">🌾 ${fmt(moi.nourriture, rev.nourriture)}</span>
     <span title="Science">🔬 ${fmt(moi.science, rev.science)}</span>
     <span title="Stabilité">🏛️ ${Math.floor(moi.stabilite)}%</span>
-    <span class="bh-ere">${ERES[moi.ere].icone} ${ERES[moi.ere].nom} · An ${G.annee}</span>`;
+    <span title="Population">👥 ${rev.popTotale}</span>
+    <span class="bh-ere">${ERES[moi.ere].icone} ${ERES[moi.ere].nom} · An ${G.annee}</span>
+    <button class="bh-menu" onclick="ouvrirMenu()">⚙️</button>`;
+}
+
+// ---------- Menu & sauvegardes manuelles ----------
+function ouvrirMenu() {
+  let slots = '';
+  for (let s = 1; s <= 3; s++) {
+    const info = infoSlot(s);
+    slots += `<div class="ligne-bien">
+      <div class="lb-info">
+        <b>💾 Emplacement ${s}</b>
+        <small>${info ? `${info.nation} — tour ${info.tour}, an ${info.annee}` : 'vide'}</small>
+      </div>
+      <button class="btn btn-mini btn-principal" onclick="uiSauvegarderSlot(${s})">Sauver</button>
+      <button class="btn btn-mini" ${info ? '' : 'disabled'} onclick="uiChargerSlot(${s})">Charger</button>
+    </div>`;
+  }
+  ouvrirModale(`<h2>⚙️ Menu</h2>
+    <p><small>La partie en cours est aussi sauvegardée automatiquement à chaque fin de tour.</small></p>
+    ${slots}
+    <div class="colonne-btn" style="margin-top:14px">
+      <button class="btn btn-danger" onclick="uiRetourTitre()">🏳️ Abandonner et retourner au titre</button>
+    </div>
+    <div class="rangee-btn"><button class="btn" onclick="fermerModale()">Fermer</button></div>`);
+}
+
+function uiSauvegarderSlot(s) {
+  if (sauvegarderSlot(s)) toast(`💾 Partie sauvegardée (emplacement ${s}).`);
+  else toast('Échec de la sauvegarde.');
+  ouvrirMenu();
+}
+
+function uiChargerSlot(s) {
+  if (!chargerSlot(s)) { toast('Emplacement vide ou illisible.'); return; }
+  fermerModale();
+  deselectionner();
+  construireCarteStatique();
+  centrerSurJoueur();
+  majTout();
+  toast(`📂 Partie chargée (emplacement ${s}).`);
+}
+
+function uiRetourTitre() {
+  fermerModale();
+  afficherEcranTitre();
 }
 
 function majTout() {

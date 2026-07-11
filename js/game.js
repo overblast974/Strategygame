@@ -95,7 +95,9 @@ function genererCarte() {
         troupes: 0,
         armee: armeeVide(),
         aBouge: false,             // l'armée a déjà agi ce tour
-        batiments: { ferme: 0, marche: 0, ecole: 0, fort: 0, exploitation: 0 },
+        batiments: batimentsVides(),
+        gisements: [],
+        pop: 0,
         capitale: false,
         citeEtat: false,
       });
@@ -112,7 +114,65 @@ function genererCarte() {
       p.terrain = 'eau'; p.nom = '';
     }
   }
+  // Gisements : chaque terre peut receler 0 à 2 ressources selon son terrain.
+  // Population initiale : les terres fertiles sont plus peuplées.
+  for (const p of provinces) {
+    if (p.terrain === 'eau') continue;
+    for (const [bien, prob] of (GISEMENTS_PAR_TERRAIN[p.terrain] || [])) {
+      if (Math.random() < prob) p.gisements.push(bien);
+    }
+    p.pop = (p.terrain === 'plaine' ? 6 : p.terrain === 'toundra' || p.terrain === 'desert' ? 3 : 4) + rand(4);
+  }
   return provinces;
+}
+
+function batimentsVides() {
+  return Object.fromEntries(Object.keys(BATIMENTS).map(k => [k, 0]));
+}
+
+// ---------- Population & emplacements ----------
+function estCotiere(p) {
+  return voisinsHex(p.col, p.row).some(i => G.provinces[i].terrain === 'eau');
+}
+
+function capaciteProvince(p) {
+  return 10 + p.batiments.ferme * 4 + (p.capitale ? 5 : 0);
+}
+
+// Rendement du travail : une province dépeuplée produit moins
+function facteurTravail(p) {
+  return clamp(p.pop / 8, 0.25, 1);
+}
+
+function emplacementsUtilises(p) {
+  return Object.values(p.batiments).filter(n => n > 0).length;
+}
+
+function emplacementsMax(p) {
+  return EMPLACEMENTS_PROVINCE + (p.capitale ? 1 : 0);
+}
+
+// Rendre des soldats à la vie civile
+function demobiliser(pid, n) {
+  const p = G.provinces[pid];
+  n = Math.min(n, p.troupes);
+  if (n <= 0) return { ok: false, raison: 'Aucune troupe' };
+  retirerUnites(p, n);
+  p.pop = Math.min(capaciteProvince(p) + 5, p.pop + n);
+  return { ok: true, rendus: n };
+}
+
+// ---------- Transport naval entre ports ----------
+function transporterTroupes(source, cible, quantite) {
+  const s = G.provinces[source], c = G.provinces[cible];
+  if (s.proprietaire !== c.proprietaire) return { ok: false };
+  if (s.batiments.port < 1 || c.batiments.port < 1) return { ok: false, raison: 'Deux ports requis' };
+  if (s.aBouge) return { ok: false, raison: 'Cette armée a déjà agi ce tour' };
+  if (quantite >= s.troupes) return { ok: false, raison: 'Une garnison doit rester' };
+  ajouterArmee(c, extraireArmee(s, quantite));
+  s.aBouge = true;
+  journal(`🚢 ${nation(s.proprietaire).nom} transporte ${quantite} troupes de ${s.nom} à ${c.nom} par la mer.`);
+  return { ok: true };
 }
 
 function placerNations(provinces, nations) {
@@ -142,6 +202,7 @@ function placerNations(provinces, nations) {
     meilleure.armee = { inf: 8, choc: 2, siege: 0 };
     majTroupes(meilleure);
     meilleure.batiments.fort = 1;
+    meilleure.pop = 12;
     capitales.push(meilleure);
   }
   // Premier anneau garanti autour de chaque capitale
@@ -190,6 +251,7 @@ function placerNations(provinces, nations) {
     majTroupes(p);
     p.batiments.fort = 1;
     p.batiments.marche = 1;
+    p.pop = 12;
   }
 }
 
@@ -205,7 +267,7 @@ function nouvellePartie(nationJoueur) {
     joueur: i === nationJoueur,
     vivante: true,
     or: 100,
-    nourriture: 100,
+    nourriture: 160,
     science: 0,
     stabilite: 70,
     ere: 0,
@@ -309,16 +371,26 @@ function puissanceMilitaire(nid) {
 }
 
 // ---------- Économie ----------
+function nbPorts(nid) {
+  return provincesDe(nid).filter(p => p.batiments.port > 0).length;
+}
+
 function revenus(nid) {
   const n = nation(nid);
-  let or_ = 0, nour = 0, sci = 0;
+  let or_ = 0, nour = 0, sci = 0, popTotale = 0;
   for (const p of provincesDe(nid)) {
     const t = TERRAINS[p.terrain];
-    or_ += t.or + p.batiments.marche * BATIMENTS.marche.bonus;
-    nour += t.nourriture + p.batiments.ferme * BATIMENTS.ferme.bonus;
-    sci += t.science + p.batiments.ecole * BATIMENTS.ecole.bonus;
+    const f = facteurTravail(p);
+    or_ += t.or * f + p.batiments.marche * BATIMENTS.marche.bonus + p.batiments.port * BATIMENTS.port.bonus;
+    // Les mines d'or produisent de l'or directement (gisement requis à la construction)
+    or_ += p.batiments.mine_or * BATIMENTS.mine_or.bonus * f;
+    nour += t.nourriture * f + p.batiments.ferme * BATIMENTS.ferme.bonus;
+    sci += t.science * f + p.batiments.ecole * BATIMENTS.ecole.bonus;
+    popTotale += p.pop;
     if (p.capitale) { or_ += 4; sci += 3; }
   }
+  // Impôts : la population paie
+  or_ += popTotale * 0.15;
   // Entretien des troupes
   const troupes = provincesDe(nid).reduce((s, p) => s + p.troupes, 0);
   const entretien = Math.floor(troupes / 2);
@@ -332,16 +404,25 @@ function revenus(nid) {
   // Le vassal verse 25 % de son or
   let verse = 0;
   if (n.vassalDe >= 0 && nation(n.vassalDe).vivante) verse = Math.floor(or_ * 0.25);
-  // Accords commerciaux : +8 or par partenaire vivant
+  // Accords commerciaux : +8 or par partenaire vivant,
+  // +5 de plus par partenaire si chacun possède un port (routes maritimes)
   let commerce = 0;
-  for (const pid of n.accords) if (nation(pid).vivante) commerce += 8;
+  let routesMaritimes = 0;
+  const mesPorts = nbPorts(nid);
+  for (const pid of n.accords) {
+    if (!nation(pid).vivante) continue;
+    commerce += 8;
+    if (mesPorts > 0 && nbPorts(pid) > 0) { commerce += 5; routesMaritimes++; }
+  }
   const mult = n.stabilite >= 50 ? 1 : 0.7; // instabilité = pertes
   return {
     or: Math.floor((or_ - entretien + tribut + commerce - verse) * mult),
     commerce,
-    nourriture: Math.floor((nour - Math.ceil(troupes / 2)) * mult),
+    routesMaritimes,
+    nourriture: Math.floor((nour - Math.ceil(troupes / 3)) * mult),
     science: Math.floor(sci * mult),
     entretien,
+    popTotale,
   };
 }
 function revenusBruts(nid) {
@@ -363,14 +444,26 @@ function coutMateriaux(type, niveauActuel) {
   };
 }
 
+// Peut-on bâtir ce type ici ? (prérequis de terrain / gisement / emplacement)
+function peutConstruire(p, type) {
+  const def = BATIMENTS[type];
+  if (def.type === 'cotier' && !estCotiere(p)) return { ok: false, raison: 'Il faut un accès à la mer' };
+  if (def.type === 'extraction' && !p.gisements.includes(def.bien)) {
+    return { ok: false, raison: `Aucun gisement de ${def.bien === 'or' ? 'or' : MARCHANDISES[def.bien].nom.toLowerCase()} ici` };
+  }
+  if (p.batiments[type] === 0 && emplacementsUtilises(p) >= emplacementsMax(p)) {
+    return { ok: false, raison: `Tous les emplacements sont occupés (${emplacementsMax(p)} max)` };
+  }
+  return { ok: true };
+}
+
 function construire(pid, type) {
   const p = G.provinces[pid];
   const n = nation(p.proprietaire);
   const niv = p.batiments[type];
   if (niv >= NIVEAU_MAX_BATIMENT) return { ok: false, raison: 'Niveau maximum atteint' };
-  if (type === 'exploitation' && !TERRAIN_BIEN[p.terrain]) {
-    return { ok: false, raison: 'Aucune ressource à exploiter ici' };
-  }
+  const pre = peutConstruire(p, type);
+  if (!pre.ok) return pre;
   const cout = coutBatiment(type, niv, n.ere);
   const mat = coutMateriaux(type, niv);
   if (n.or < cout) return { ok: false, raison: 'Or insuffisant' };
@@ -387,6 +480,7 @@ function recruter(pid, type, quantite) {
   const p = G.provinces[pid];
   const n = nation(p.proprietaire);
   const c = TYPES_UNITES[type].cout;
+  if (p.pop <= quantite) return { ok: false, raison: `Population insuffisante (${quantite} 👥 requis, il faut en garder)` };
   if (n.or < c.or * quantite) return { ok: false, raison: 'Or insuffisant' };
   if (n.nourriture < c.nourriture * quantite) return { ok: false, raison: 'Nourriture insuffisante' };
   if (n.marchandises.fer < c.fer * quantite) return { ok: false, raison: `Fer insuffisant (${c.fer * quantite} ⚒️ requis)` };
@@ -395,17 +489,23 @@ function recruter(pid, type, quantite) {
   n.nourriture -= c.nourriture * quantite;
   n.marchandises.fer -= c.fer * quantite;
   n.marchandises.pierre -= c.pierre * quantite;
+  p.pop -= quantite; // les soldats viennent du peuple
   p.armee[type] += quantite;
   majTroupes(p);
   return { ok: true };
 }
 
 // ---------- Production & marché mondial ----------
+// Un gisement produit 1/tour à l'état brut, bien plus avec le bâtiment adéquat.
 function productionMarchandises(nid) {
   const prod = { bois: 0, fer: 0, pierre: 0, epices: 0 };
   for (const p of provincesDe(nid)) {
-    const bien = TERRAIN_BIEN[p.terrain];
-    if (bien) prod[bien] += 2 + p.batiments.exploitation * BATIMENTS.exploitation.bonus;
+    const f = facteurTravail(p);
+    for (const bien of p.gisements) {
+      if (bien === 'or') continue; // l'or est géré dans revenus()
+      const bat = BATIMENT_POUR_GISEMENT[bien];
+      prod[bien] += Math.round((1 + p.batiments[bat] * BATIMENTS[bat].bonus) * f);
+    }
   }
   return prod;
 }
@@ -870,13 +970,20 @@ function finDeTour() {
     // Production de marchandises
     const prod = productionMarchandises(n.id);
     for (const bien of Object.keys(MARCHANDISES)) n.marchandises[bien] += prod[bien];
-    // Famine
+    // Famine : le peuple meurt, les soldats désertent
     if (n.nourriture < 0) {
       n.nourriture = 0;
       n.stabilite -= 8;
       const miennes = provincesDe(n.id).filter(p => p.troupes > 1);
       if (miennes.length) { retirerUnites(pick(miennes), 1); }
-      if (n.joueur) evenementsTour.push('⚠️ Famine ! Votre peuple souffre (stabilité et troupes en baisse).');
+      const peuplees = provincesDe(n.id).filter(p => p.pop > 2);
+      for (let i = 0; i < 2 && peuplees.length; i++) pick(peuplees).pop--;
+      if (n.joueur) evenementsTour.push('⚠️ Famine ! Votre peuple meurt et vos soldats désertent.');
+    } else {
+      // Croissance démographique : le peuple nourri prospère
+      for (const p of provincesDe(n.id)) {
+        if (p.pop < capaciteProvince(p) && Math.random() < 0.5) p.pop++;
+      }
     }
     // Stabilité se régénère lentement en paix
     if (n.guerres.length === 0) n.stabilite = clamp(n.stabilite + 2, 0, 100);
@@ -1020,8 +1127,33 @@ function migrerSauvegarde() {
   }
   for (const p of G.provinces) {
     if (!p.armee) p.armee = { inf: p.troupes || 0, choc: 0, siege: 0 };
-    if (p.batiments.exploitation === undefined) p.batiments.exploitation = 0;
     if (p.citeEtat === undefined) p.citeEtat = false;
+    // Nouveaux bâtiments : compléter les clés manquantes
+    for (const type of Object.keys(BATIMENTS)) {
+      if (p.batiments[type] === undefined) p.batiments[type] = 0;
+    }
+    // Population : initialiser si absente
+    if (p.pop === undefined) p.pop = p.terrain === 'eau' ? 0 : (p.capitale || p.citeEtat ? 12 : 5 + rand(4));
+    // Gisements : générer si absents, en garantissant l'ancien bien du terrain
+    if (p.gisements === undefined) {
+      p.gisements = [];
+      if (p.terrain !== 'eau') {
+        for (const [bien, prob] of (GISEMENTS_PAR_TERRAIN[p.terrain] || [])) {
+          if (Math.random() < prob) p.gisements.push(bien);
+        }
+        const ancien = TERRAIN_BIEN[p.terrain];
+        if (ancien && !p.gisements.includes(ancien)) p.gisements.push(ancien);
+      }
+    }
+    // Ancienne « Exploitation » générique → bâtiment d'extraction dédié
+    if (p.batiments.exploitation > 0) {
+      const bien = TERRAIN_BIEN[p.terrain];
+      if (bien) {
+        const bat = BATIMENT_POUR_GISEMENT[bien];
+        p.batiments[bat] = Math.max(p.batiments[bat], p.batiments.exploitation);
+      }
+      delete p.batiments.exploitation;
+    }
   }
   if (!G.mercenaires) { G.mercenaires = []; genererMercenaires(); }
 }
@@ -1032,4 +1164,35 @@ function sauvegardeExiste() {
 
 function supprimerSauvegarde() {
   try { localStorage.removeItem(CLE_SAUVEGARDE); } catch (e) {}
+}
+
+// ---------- Sauvegardes manuelles (3 emplacements) ----------
+function cleSlot(slot) { return CLE_SAUVEGARDE + '-slot' + slot; }
+
+function sauvegarderSlot(slot) {
+  try {
+    localStorage.setItem(cleSlot(slot), JSON.stringify(G));
+    return true;
+  } catch (e) { return false; }
+}
+
+function chargerSlot(slot) {
+  try {
+    const brut = localStorage.getItem(cleSlot(slot));
+    if (!brut) return false;
+    G = JSON.parse(brut);
+    migrerSauvegarde();
+    sauvegarder(); // devient aussi la partie en cours
+    return true;
+  } catch (e) { return false; }
+}
+
+// Métadonnées d'un emplacement pour l'affichage du menu
+function infoSlot(slot) {
+  try {
+    const brut = localStorage.getItem(cleSlot(slot));
+    if (!brut) return null;
+    const s = JSON.parse(brut);
+    return { tour: s.tour, annee: s.annee, nation: s.nations[s.joueur].nom };
+  } catch (e) { return null; }
 }

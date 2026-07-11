@@ -25,7 +25,12 @@ La partie est **sauvegardée automatiquement** à chaque fin de tour (localStora
 | **Armées** | 3 types d'unités à acheter, aux noms évoluant par ère : infanterie 🗡️, choc 🐎 (chevaliers → chars → mechas, +60 % attaque) et siège 💣 (trébuchets → artillerie, neutralise les forteresses). |
 | **Diplomatie** | Relations dynamiques, alliances, pactes de non-agression, accords commerciaux, achat direct de ressources (−10 % du marché), tribut sous la menace (gare au retour de flamme…), cadeaux, vassalisation, négociation de paix. |
 | **Économie** | Or, nourriture, science, stabilité. Constructions améliorables : fermes, marchés, académies, forteresses, exploitations. Famines, révoltes, entretien des armées. |
-| **Production & commerce** | 4 marchandises produites par le terrain : 🪵 bois (forêts), ⚒️ fer (montagnes), 🪨 pierre (collines), 🌶️ épices (déserts). Le fer équipe les unités, le bois et la pierre servent aux bâtiments, les épices remontent la stabilité. **Marché mondial à prix dynamiques** (l'offre et la demande — y compris celles des IA — font bouger les cours) et accords commerciaux entre nations (+8 💰/tour chacun). |
+| **Population** 👥 | Chaque province a des habitants : ils travaillent (le rendement dépend de la population), paient l'impôt et croissent si le peuple est nourri. **Recruter consomme la population** ; on peut démobiliser des soldats pour les rendre aux champs. |
+| **Gisements & extraction** | Chaque province recèle 0 à 2 gisements (🪵 ⚒️ 🪨 🌶️ et 🪙 or) selon son terrain. Il faut bâtir **le bâtiment adéquat** (scierie, mine de fer, carrière, plantation, mine d'or) pour l'exploiter vraiment. |
+| **Choix d'aménagement** | **4 emplacements de bâtiment par province** (5 en capitale) parmi 10 bâtiments : impossible de tout avoir. Pays marchand (marchés, mines d'or, plantations, ports) ou puissance industrielle (mines de fer, carrières = armes bon marché) ? |
+| **Commerce naval** ⚓ | Le port (côtier) ouvre des **routes maritimes** avec les partenaires commerciaux équipés de ports (+5 💰/tour chacune, tracées sur la carte) et permet le **transport naval** de troupes entre vos ports. |
+| **Production & commerce** | 4 marchandises échangeables : le fer équipe les unités, le bois et la pierre servent aux bâtiments, les épices remontent la stabilité. **Marché mondial à prix dynamiques** (l'offre et la demande — y compris celles des IA — font bouger les cours) et accords commerciaux entre nations (+8 💰/tour chacun). |
+| **Sauvegardes** 💾 | Sauvegarde automatique chaque tour + **3 emplacements manuels** via le menu ⚙️. |
 | **Événements** | Événements narratifs à choix multiples adaptés à votre ère (mariage princier, peste, grève ouvrière, IA émergente…). |
 
 ## 🏆 Trois voies de victoire

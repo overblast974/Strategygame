@@ -123,6 +123,12 @@ button { font-family: inherit; cursor: pointer; }
 .btn-mini small { font-size: 10px; display: block; }
 .liste-biens { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
 .titre-section { color: #ffe9a0; font-size: 15px; margin: 14px 0 8px; }
+.pp-emplacements { font-size: 12px; color: #9db2c7; margin: 8px 0 6px; font-weight: 600; }
+.bh-menu {
+  background: #223142; color: #e8e2d5;
+  border: 1px solid #3a4f66; border-radius: 8px;
+  padding: 4px 10px; font-size: 14px; flex-shrink: 0;
+}
 .pp-aide { margin-top: 10px; font-size: 11px; color: #9db2c7; text-align: center; }
 
 /* ---------- Boutons génériques ---------- */
