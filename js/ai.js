@@ -13,10 +13,13 @@ function iaJouerTour(nid) {
   // ---- 1. Diplomatie ----
   iaDiplomatie(nid, perso);
 
-  // ---- 2. Économie : construire ----
+  // ---- 2. Commerce : vendre les surplus, acheter le nécessaire ----
+  iaCommerce(nid, perso);
+
+  // ---- 3. Économie : construire ----
   iaConstruire(nid, perso, miennes);
 
-  // ---- 3. Recruter ----
+  // ---- 4. Recruter ----
   iaRecruter(nid, perso, miennes);
 
   // ---- 4. Guerre : attaquer / consolider ----
@@ -68,6 +71,11 @@ function iaDiplomatie(nid, perso) {
       envoyerCadeau(nid, autre.id, 30);
     }
 
+    // Accord commercial avec les nations amicales
+    if (!aAccord(nid, autre.id) && rel > 10 && Math.random() < perso.commerce * 0.3) {
+      proposerAccordCommercial(nid, autre.id);
+    }
+
     // Déclarer la guerre à une cible faible et détestée
     if (!enGuerre(nid, autre.id) && !aPacte(nid, autre.id) && !allies(nid, autre.id) &&
         autre.vassalDe !== nid && n.vassalDe === -1) {
@@ -111,6 +119,32 @@ function iaConstruire(nid, perso, miennes) {
   }
 }
 
+// L'IA vend ses surplus, achète ce qui lui manque et festoie si besoin
+function iaCommerce(nid, perso) {
+  const n = nation(nid);
+  for (const bien of Object.keys(MARCHANDISES)) {
+    // Vendre l'excédent (les marchands stockent moins)
+    const plafond = 60 - perso.commerce * 20;
+    if (n.marchandises[bien] > plafond) {
+      marcheVendre(nid, bien, Math.floor(n.marchandises[bien] - plafond + 10));
+    }
+  }
+  // Acheter le fer nécessaire au recrutement
+  if (n.marchandises.fer < 10 && n.or > 100) marcheAcheter(nid, 'fer', 10);
+  // Acheter le bois nécessaire aux constructions
+  if (n.marchandises.bois < 10 && n.or > 120) marcheAcheter(nid, 'bois', 10);
+  // Fêtes si le peuple gronde
+  if (n.stabilite < 40 && n.marchandises.epices >= COUT_FETES_EPICES) organiserFetes(nid);
+}
+
+// Choix du type d'unité selon la personnalité et la situation
+function iaChoisirTypeUnite(n, perso) {
+  const roll = Math.random();
+  if (n.guerres.length > 0 && roll < 0.15) return 'siege';
+  if (roll < 0.2 + perso.agression * 0.3) return 'choc';
+  return 'inf';
+}
+
 function iaRecruter(nid, perso, miennes) {
   const n = nation(nid);
   const troupes = miennes.reduce((s, p) => s + p.troupes, 0);
@@ -118,10 +152,11 @@ function iaRecruter(nid, perso, miennes) {
   if (troupes >= cible) return;
   let aRecruter = Math.min(
     Math.ceil(cible - troupes),
-    Math.floor(n.or / COUT_RECRUE_OR / 2),
-    Math.floor(n.nourriture / COUT_RECRUE_NOURRITURE / 2)
+    Math.floor(n.or / TYPES_UNITES.inf.cout.or / 2),
+    Math.floor(n.nourriture / TYPES_UNITES.inf.cout.nourriture / 2)
   );
-  while (aRecruter > 0) {
+  let echecs = 0;
+  while (aRecruter > 0 && echecs < 3) {
     // Recruter près du front ou dans la capitale
     const front = miennes.filter(p => voisinsHex(p.col, p.row).some(v => {
       const vp = G.provinces[v];
@@ -129,8 +164,13 @@ function iaRecruter(nid, perso, miennes) {
     }));
     const ou = front.length ? pick(front) : pick(miennes);
     const lot = Math.min(aRecruter, 3);
-    const res = recruter(ou.id, lot);
-    if (!res.ok) break;
+    const type = iaChoisirTypeUnite(n, perso);
+    const res = recruter(ou.id, type, lot);
+    if (!res.ok) {
+      // Le type voulu est trop cher : retenter en infanterie
+      const res2 = recruter(ou.id, 'inf', lot);
+      if (!res2.ok) { echecs++; continue; }
+    }
     aRecruter -= lot;
   }
 }
@@ -147,10 +187,11 @@ function iaMilitaire(nid, perso, miennes) {
       // Attaquer seulement avec un avantage estimé
       const meilleures = cibles
         .map(c => {
-          const puissDef = Math.max(1, c.troupes) *
-            (c.proprietaire >= 0 ? ERES[nation(c.proprietaire).ere].puissance : 1) *
-            (1 + c.batiments.fort * BATIMENTS.fort.bonus) * TERRAINS[c.terrain].defense;
-          const puissAtt = (p.troupes - 1) * ERES[n.ere].puissance;
+          const ereDef = c.proprietaire >= 0 ? nation(c.proprietaire).ere : 0;
+          const reducSiege = Math.max(0.35, 1 - p.armee.siege * 0.12);
+          const puissDef = Math.max(1, forceDefense(c.armee, ereDef)) *
+            (1 + c.batiments.fort * BATIMENTS.fort.bonus * reducSiege) * TERRAINS[c.terrain].defense;
+          const puissAtt = forceAttaque(p.armee, n.ere) * (p.troupes - 1) / p.troupes;
           return { c, avantage: puissAtt / puissDef };
         })
         .filter(x => x.avantage > 1.15 + (1 - perso.agression) * 0.5)

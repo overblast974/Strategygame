@@ -531,6 +531,8 @@ function afficherPanneauProvince(pid) {
   const monTour = p.proprietaire === G.joueur;
   const ere = n ? n.ere : 0;
 
+  const bien = TERRAIN_BIEN[p.terrain];
+  const prodBien = bien ? 2 + p.batiments.exploitation * BATIMENTS.exploitation.bonus : 0;
   let html = `<div class="pp-titre">
     <span class="pastille" style="background:${n ? n.couleur : '#777'}"></span>
     <b>${p.nom}</b> ${p.capitale ? '★' : ''}
@@ -541,24 +543,35 @@ function afficherPanneauProvince(pid) {
     <span>🌾 ${t.nourriture + p.batiments.ferme * 3}</span>
     <span>💰 ${t.or + p.batiments.marche * 3}</span>
     <span>🔬 ${t.science + p.batiments.ecole * 3}</span>
-    <span>⚔️ ${p.troupes} ${monTour && p.aBouge ? '(a agi)' : ''}</span>
+    ${bien ? `<span>${MARCHANDISES[bien].icone} ${prodBien}</span>` : ''}
     <span>🛡️ ×${(t.defense * (1 + p.batiments.fort * BATIMENTS.fort.bonus)).toFixed(1)}</span>
+    <span>⚔️ ${p.troupes} (${TYPES_UNITES.inf.icone}${p.armee.inf} ${TYPES_UNITES.choc.icone}${p.armee.choc} ${TYPES_UNITES.siege.icone}${p.armee.siege})${monTour && p.aBouge ? ' · a agi' : ''}</span>
   </div>`;
 
   if (monTour) {
     const moi = nation(G.joueur);
-    html += `<div class="pp-actions">
-      <button class="btn btn-recruter" onclick="uiRecruter(${pid},1)">+1 ${ERES[moi.ere].unite}<br><small>${COUT_RECRUE_OR}💰 ${COUT_RECRUE_NOURRITURE}🌾</small></button>
-      <button class="btn btn-recruter" onclick="uiRecruter(${pid},5)">+5<br><small>${COUT_RECRUE_OR * 5}💰 ${COUT_RECRUE_NOURRITURE * 5}🌾</small></button>
-    </div><div class="pp-batiments">`;
+    html += `<div class="pp-recrues">`;
+    for (const [type, def] of Object.entries(TYPES_UNITES)) {
+      const c = def.cout;
+      const couts = `${c.or}💰 ${c.nourriture}🌾${c.fer ? ` ${c.fer}⚒️` : ''}${c.pierre ? ` ${c.pierre}🪨` : ''}`;
+      html += `<div class="ligne-recrue">
+        <div class="lr-info"><b>${def.icone} ${def.noms[moi.ere]}</b><small>${couts}</small></div>
+        <button class="btn btn-mini" onclick="uiRecruter(${pid},'${type}',1)">+1</button>
+        <button class="btn btn-mini" onclick="uiRecruter(${pid},'${type}',5)">+5</button>
+      </div>`;
+    }
+    html += `</div><div class="pp-batiments">`;
     for (const [type, def] of Object.entries(BATIMENTS)) {
+      if (type === 'exploitation' && !bien) continue;
       const niv = p.batiments[type];
       const nomEre = NOMS_BATIMENTS_PAR_ERE[type][ere];
       if (niv >= NIVEAU_MAX_BATIMENT) {
         html += `<button class="btn btn-bat" disabled>${def.icone} ${nomEre}<br><small>MAX (${niv})</small></button>`;
       } else {
         const cout = coutBatiment(type, niv, moi.ere);
-        html += `<button class="btn btn-bat" onclick="uiConstruire(${pid},'${type}')">${def.icone} ${nomEre} ${niv > 0 ? 'niv.' + (niv + 1) : ''}<br><small>${cout}💰</small></button>`;
+        const mat = coutMateriaux(type, niv);
+        const couts = `${cout}💰${mat.bois ? ` ${mat.bois}🪵` : ''}${mat.pierre ? ` ${mat.pierre}🪨` : ''}`;
+        html += `<button class="btn btn-bat" onclick="uiConstruire(${pid},'${type}')">${def.icone} ${nomEre} ${niv > 0 ? 'niv.' + (niv + 1) : ''}<br><small>${couts}</small></button>`;
       }
     }
     html += `</div><div class="pp-aide">Touchez une case voisine : la vôtre = déplacer · ennemie = attaquer</div>`;
@@ -574,8 +587,8 @@ function afficherPanneauProvince(pid) {
   el.classList.add('ouvert');
 }
 
-function uiRecruter(pid, q) {
-  const r = recruter(pid, q);
+function uiRecruter(pid, type, q) {
+  const r = recruter(pid, type, q);
   if (!r.ok) toast(r.raison);
   majTout();
   afficherPanneauProvince(pid);
@@ -613,11 +626,14 @@ function ouvrirAttaque(source, cible) {
   const s = G.provinces[source], c = G.provinces[cible];
   const defNom = c.proprietaire >= 0 ? nation(c.proprietaire).nom : 'Indépendants';
   const engages = s.troupes - 1;
-  const puissDef = Math.max(1, c.troupes) *
-    (c.proprietaire >= 0 ? ERES[nation(c.proprietaire).ere].puissance : 1) *
-    (1 + c.batiments.fort * BATIMENTS.fort.bonus) * TERRAINS[c.terrain].defense;
-  const puissAtt = engages * ERES[nation(G.joueur).ere].puissance;
+  const ereDef = c.proprietaire >= 0 ? nation(c.proprietaire).ere : 0;
+  const reducSiege = Math.max(0.35, 1 - s.armee.siege * 0.12);
+  const puissDef = Math.max(1, forceDefense(c.armee, ereDef)) *
+    (1 + c.batiments.fort * BATIMENTS.fort.bonus * reducSiege) * TERRAINS[c.terrain].defense;
+  const puissAtt = forceAttaque(s.armee, nation(G.joueur).ere) * engages / Math.max(1, s.troupes);
   const chances = puissAtt > puissDef * 1.3 ? 'Très favorables' : puissAtt > puissDef ? 'Favorables' : puissAtt > puissDef * 0.7 ? 'Incertaines' : 'Défavorables';
+  const noteSiege = s.armee.siege > 0 && c.batiments.fort > 0
+    ? `<p>💣 Vos armes de siège réduisent la forteresse de ${Math.round((1 - reducSiege) * 100)} %.</p>` : '';
 
   UI._attaque = () => {
     const r = resoudreAttaque(source, cible);
@@ -630,8 +646,9 @@ function ouvrirAttaque(source, cible) {
     if (G.fini) verifierFinPartie();
   };
   ouvrirModale(`<h2>⚔️ Attaquer ${c.nom}</h2>
-    <p>${defNom} — garnison de <b>${c.troupes}</b> ${c.batiments.fort ? '· 🏰 forteresse' : ''} · terrain ${TERRAINS[c.terrain].nom.toLowerCase()}</p>
-    <p>Vous engagez <b>${engages}</b> ${ERES[nation(G.joueur).ere].unite} (1 reste en garnison).</p>
+    <p>${defNom} — garnison de <b>${c.troupes}</b> (${TYPES_UNITES.inf.icone}${c.armee.inf} ${TYPES_UNITES.choc.icone}${c.armee.choc} ${TYPES_UNITES.siege.icone}${c.armee.siege}) ${c.batiments.fort ? '· 🏰 forteresse' : ''} · terrain ${TERRAINS[c.terrain].nom.toLowerCase()}</p>
+    <p>Vous engagez <b>${engages}</b> unités (${TYPES_UNITES.inf.icone}${s.armee.inf} ${TYPES_UNITES.choc.icone}${s.armee.choc} ${TYPES_UNITES.siege.icone}${s.armee.siege}, 1 reste en garnison).</p>
+    ${noteSiege}
     <p>Estimation : <b>${chances}</b></p>
     <div class="rangee-btn">
       <button class="btn btn-danger" onclick="UI._attaque();fermerModale()">À l'assaut !</button>
@@ -675,6 +692,7 @@ function ouvrirDiplomatie() {
     if (enGuerre(G.joueur, n.id)) statut.push('⚡ EN GUERRE');
     if (allies(G.joueur, n.id)) statut.push('🤝 Allié');
     if (aPacte(G.joueur, n.id)) statut.push('📜 Pacte');
+    if (aAccord(G.joueur, n.id)) statut.push('💱 Commerce');
     if (n.vassalDe === G.joueur) statut.push('👑 Votre vassal');
     if (moi.vassalDe === n.id) statut.push('⛓️ Votre suzerain');
     html += `<div class="carte-nation" onclick="ouvrirDiplomatieAvec(${n.id})">
@@ -708,6 +726,7 @@ function ouvrirDiplomatieAvec(nid) {
     if (!allie) boutons += `<button class="btn btn-principal" onclick="uiDiplo('alliance',${nid})">🤝 Proposer une alliance</button>`;
     else boutons += `<button class="btn btn-danger" onclick="uiDiplo('rompre',${nid})">💔 Rompre l'alliance</button>`;
     if (!pacte && !allie) boutons += `<button class="btn" onclick="uiDiplo('pacte',${nid})">📜 Pacte de non-agression</button>`;
+    if (!aAccord(G.joueur, nid)) boutons += `<button class="btn" onclick="uiDiplo('accord',${nid})">💱 Accord commercial (+8 💰/tour chacun)</button>`;
     boutons += `<button class="btn" onclick="uiDiplo('cadeau',${nid},50)">🎁 Cadeau (50 💰)</button>`;
     if (!monVassal && moi.vassalDe === -1) boutons += `<button class="btn" onclick="uiDiplo('vassal',${nid})">👑 Exiger la vassalité</button>`;
     if (monVassal) boutons += `<button class="btn" onclick="uiDiplo('liberer',${nid})">🕊️ Libérer ce vassal</button>`;
@@ -727,6 +746,7 @@ function uiDiplo(action, nid, montant = 0) {
     case 'alliance': r = proposerAlliance(G.joueur, nid); break;
     case 'rompre': romprAlliance(G.joueur, nid); r = { ok: true }; break;
     case 'pacte': r = proposerPacte(G.joueur, nid); break;
+    case 'accord': r = proposerAccordCommercial(G.joueur, nid); break;
     case 'cadeau': r = envoyerCadeau(G.joueur, nid, montant); break;
     case 'vassal': r = demanderVassalite(G.joueur, nid); break;
     case 'liberer': r = liberer(G.joueur, nid); break;
@@ -735,6 +755,49 @@ function uiDiplo(action, nid, montant = 0) {
   if (!r.ok && r.raison) toast(r.raison);
   majTout();
   ouvrirDiplomatieAvec(nid);
+}
+
+// ---------- Commerce ----------
+function ouvrirCommerce() {
+  const moi = nation(G.joueur);
+  const prod = productionMarchandises(G.joueur);
+  let html = `<h2>📦 Commerce</h2>
+    <p>💰 Trésor : <b>${Math.floor(moi.or)}</b> · Le marché mondial fluctue selon l'offre et la demande.</p>
+    <div class="liste-biens">`;
+  for (const [bien, def] of Object.entries(MARCHANDISES)) {
+    const m = G.marche[bien];
+    const tendance = m.prix > def.prixBase * 1.15 ? '📈' : m.prix < def.prixBase * 0.85 ? '📉' : '➖';
+    html += `<div class="ligne-bien">
+      <div class="lb-info">
+        <b>${def.icone} ${def.nom}</b>
+        <small>Stock : ${Math.floor(moi.marchandises[bien])} (+${prod[bien]}/tour) · Prix : ${m.prix.toFixed(1)} ${tendance}</small>
+      </div>
+      <button class="btn btn-mini" onclick="uiMarche('acheter','${bien}')">Acheter 10<br><small>−${prixAchat(bien) * 10}💰</small></button>
+      <button class="btn btn-mini btn-principal" onclick="uiMarche('vendre','${bien}')">Vendre 10<br><small>+${prixVente(bien) * 10}💰</small></button>
+    </div>`;
+  }
+  html += `</div>
+    <button class="btn" style="width:100%" onclick="uiFetes()">🎉 Organiser des fêtes (${COUT_FETES_EPICES} 🌶️ → +10 🏛️ stabilité)</button>
+    <p style="margin-top:10px"><small>💱 Accords commerciaux actifs : ${moi.accords.filter(a => nation(a).vivante).length}
+    (+${revenus(G.joueur).commerce || 0} 💰/tour) — négociez-en via la Diplomatie.<br>
+    ⚒️ Le fer équipe vos unités · 🪵 le bois et 🪨 la pierre servent aux bâtiments · 🌶️ les épices font la fête.</small></p>
+    <div class="rangee-btn"><button class="btn" onclick="fermerModale()">Fermer</button></div>`;
+  ouvrirModale(html);
+}
+
+function uiMarche(action, bien) {
+  const r = action === 'acheter' ? marcheAcheter(G.joueur, bien, 10) : marcheVendre(G.joueur, bien, 10);
+  if (!r.ok) toast(r.raison);
+  majBarre();
+  ouvrirCommerce();
+}
+
+function uiFetes() {
+  const r = organiserFetes(G.joueur);
+  if (!r.ok) toast(r.raison);
+  else toast('🎉 Le peuple festoie ! (+10 stabilité)');
+  majBarre();
+  ouvrirCommerce();
 }
 
 // ---------- Technologie ----------

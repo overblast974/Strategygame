@@ -20,8 +20,10 @@ La partie est **sauvegardée automatiquement** à chaque fin de tour (localStora
 | **8 nations** | Chacune avec une personnalité d'IA : conquérant, diplomate, marchand, savant, opportuniste, expansionniste. |
 | **5 ères** | Moyen Âge → Renaissance → Industrielle → Moderne → Futuriste. Les unités évoluent (chevaliers → mousquetaires → fusiliers → blindés → mechas) ainsi que les bâtiments. |
 | **Guerre** | Déclaration de guerre, conquête province par province, bonus de terrain et de forteresse, garnisons, capitales. Les alliés rejoignent les guerres défensives. |
-| **Diplomatie** | Relations dynamiques, alliances, pactes de non-agression, cadeaux, tributs, vassalisation, négociation de paix (avec compensation en or). |
-| **Économie** | Or, nourriture, science, stabilité. Constructions améliorables : fermes, marchés, académies, forteresses. Famines, révoltes, entretien des armées. |
+| **Armées** | 3 types d'unités à acheter, aux noms évoluant par ère : infanterie 🗡️, choc 🐎 (chevaliers → chars → mechas, +60 % attaque) et siège 💣 (trébuchets → artillerie, neutralise les forteresses). |
+| **Diplomatie** | Relations dynamiques, alliances, pactes de non-agression, accords commerciaux, cadeaux, tributs, vassalisation, négociation de paix (avec compensation en or). |
+| **Économie** | Or, nourriture, science, stabilité. Constructions améliorables : fermes, marchés, académies, forteresses, exploitations. Famines, révoltes, entretien des armées. |
+| **Production & commerce** | 4 marchandises produites par le terrain : 🪵 bois (forêts), ⚒️ fer (montagnes), 🪨 pierre (collines), 🌶️ épices (déserts). Le fer équipe les unités, le bois et la pierre servent aux bâtiments, les épices remontent la stabilité. **Marché mondial à prix dynamiques** (l'offre et la demande — y compris celles des IA — font bouger les cours) et accords commerciaux entre nations (+8 💰/tour chacun). |
 | **Événements** | Événements narratifs à choix multiples adaptés à votre ère (mariage princier, peste, grève ouvrière, IA émergente…). |
 
 ## 🏆 Trois voies de victoire

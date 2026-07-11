@@ -54,8 +54,9 @@ function genererCarte() {
         nom: terrain === 'eau' ? '' : nomProvince(),
         proprietaire: -1,          // -1 = indépendant, sinon id de nation
         troupes: 0,
+        armee: armeeVide(),
         aBouge: false,             // l'armée a déjà agi ce tour
-        batiments: { ferme: 0, marche: 0, ecole: 0, fort: 0 },
+        batiments: { ferme: 0, marche: 0, ecole: 0, fort: 0, exploitation: 0 },
         capitale: false,
       });
     }
@@ -94,7 +95,8 @@ function placerNations(provinces, nations) {
     if (!meilleure) meilleure = terres.find(p => p.proprietaire === -1);
     meilleure.proprietaire = n;
     meilleure.capitale = true;
-    meilleure.troupes = 10;
+    meilleure.armee = { inf: 8, choc: 2, siege: 0 };
+    majTroupes(meilleure);
     meilleure.batiments.fort = 1;
     capitales.push(meilleure);
   }
@@ -105,7 +107,8 @@ function placerNations(provinces, nations) {
       const v = provinces[vid];
       if (v.terrain !== 'eau' && v.proprietaire === -1) {
         v.proprietaire = n;
-        v.troupes = 2 + rand(3);
+        v.armee = { inf: 2 + rand(3), choc: 0, siege: 0 };
+        majTroupes(v);
       }
     }
   }
@@ -118,7 +121,8 @@ function placerNations(provinces, nations) {
           const v = provinces[vid];
           if (v.terrain !== 'eau' && v.proprietaire === -1 && Math.random() < 0.35) {
             v.proprietaire = n;
-            v.troupes = 2 + rand(3);
+            v.armee = { inf: 2 + rand(3), choc: 0, siege: 0 };
+            majTroupes(v);
           }
         }
       }
@@ -126,7 +130,10 @@ function placerNations(provinces, nations) {
   }
   // Provinces indépendantes restantes : petite garnison
   for (const p of provinces) {
-    if (p.terrain !== 'eau' && p.proprietaire === -1) p.troupes = 3 + rand(4);
+    if (p.terrain !== 'eau' && p.proprietaire === -1) {
+      p.armee = { inf: 3 + rand(4), choc: 0, siege: 0 };
+      majTroupes(p);
+    }
   }
 }
 
@@ -151,6 +158,8 @@ function nouvellePartie(nationJoueur) {
     alliances: [],
     pactes: [],
     guerres: [],
+    accords: [],            // accords commerciaux
+    marchandises: { bois: 30, fer: 20, pierre: 20, epices: 10 },
   }));
 
   const provinces = genererCarte();
@@ -165,6 +174,7 @@ function nouvellePartie(nationJoueur) {
     journal: [],
     fini: false,
     message: null,
+    marche: Object.fromEntries(Object.entries(MARCHANDISES).map(([k, m]) => [k, { prix: m.prixBase }])),
   };
   journal(`⚑ L'an ${G.annee}. ${nations[nationJoueur].nom} entre dans l'Histoire.`);
   return G;
@@ -183,10 +193,57 @@ function allies(a, b) { return nation(a).alliances.includes(b); }
 function aPacte(a, b) { return nation(a).pactes.includes(b); }
 function estVassal(a, b) { return nation(a).vassalDe === b; }
 
+// ---------- Armées (composition inf / choc / siège) ----------
+function armeeVide() { return { inf: 0, choc: 0, siege: 0 }; }
+function totalArmee(a) { return a.inf + a.choc + a.siege; }
+function majTroupes(p) { p.troupes = totalArmee(p.armee); }
+
+function forceAttaque(a, ere) {
+  return (a.inf * TYPES_UNITES.inf.attaque + a.choc * TYPES_UNITES.choc.attaque +
+          a.siege * TYPES_UNITES.siege.attaque) * ERES[ere].puissance;
+}
+function forceDefense(a, ere) {
+  return (a.inf * TYPES_UNITES.inf.defense + a.choc * TYPES_UNITES.choc.defense +
+          a.siege * TYPES_UNITES.siege.defense) * ERES[ere].puissance;
+}
+
+// Retire n unités d'une composition (en commençant par le type le plus nombreux)
+function retirerComposition(a, n) {
+  const retire = armeeVide();
+  for (let i = 0; i < n; i++) {
+    const type = ['inf', 'choc', 'siege'].sort((x, y) => a[y] - a[x])[0];
+    if (a[type] <= 0) break;
+    a[type]--;
+    retire[type]++;
+  }
+  return retire;
+}
+
+// Prélève n unités d'une province (pour attaque / déplacement)
+function extraireArmee(p, n) {
+  const prise = retirerComposition(p.armee, Math.min(n, totalArmee(p.armee)));
+  majTroupes(p);
+  return prise;
+}
+
+function ajouterArmee(p, comp) {
+  p.armee.inf += comp.inf;
+  p.armee.choc += comp.choc;
+  p.armee.siege += comp.siege;
+  majTroupes(p);
+}
+
+// Retire n unités directement dans la province
+function retirerUnites(p, n) {
+  retirerComposition(p.armee, Math.min(n, totalArmee(p.armee)));
+  majTroupes(p);
+}
+
 function puissanceMilitaire(nid) {
   const n = nation(nid);
-  const troupes = provincesDe(nid).reduce((s, p) => s + p.troupes, 0);
-  return troupes * ERES[n.ere].puissance;
+  let f = 0;
+  for (const p of provincesDe(nid)) f += forceAttaque(p.armee, n.ere);
+  return f;
 }
 
 // ---------- Économie ----------
@@ -213,9 +270,13 @@ function revenus(nid) {
   // Le vassal verse 25 % de son or
   let verse = 0;
   if (n.vassalDe >= 0 && nation(n.vassalDe).vivante) verse = Math.floor(or_ * 0.25);
+  // Accords commerciaux : +8 or par partenaire vivant
+  let commerce = 0;
+  for (const pid of n.accords) if (nation(pid).vivante) commerce += 8;
   const mult = n.stabilite >= 50 ? 1 : 0.7; // instabilité = pertes
   return {
-    or: Math.floor((or_ - entretien + tribut - verse) * mult),
+    or: Math.floor((or_ - entretien + tribut + commerce - verse) * mult),
+    commerce,
     nourriture: Math.floor((nour - Math.ceil(troupes / 2)) * mult),
     science: Math.floor(sci * mult),
     entretien,
@@ -231,31 +292,95 @@ function coutBatiment(type, niveauActuel, ere) {
   return Math.floor(BATIMENTS[type].coutBase * (niveauActuel + 1) * (1 + ere * 0.35));
 }
 
+// Coût matériaux d'un bâtiment au niveau donné
+function coutMateriaux(type, niveauActuel) {
+  const def = BATIMENTS[type];
+  return {
+    bois: def.bois * (niveauActuel + 1),
+    pierre: def.pierre * (niveauActuel + 1),
+  };
+}
+
 function construire(pid, type) {
   const p = G.provinces[pid];
   const n = nation(p.proprietaire);
   const niv = p.batiments[type];
   if (niv >= NIVEAU_MAX_BATIMENT) return { ok: false, raison: 'Niveau maximum atteint' };
+  if (type === 'exploitation' && !TERRAIN_BIEN[p.terrain]) {
+    return { ok: false, raison: 'Aucune ressource à exploiter ici' };
+  }
   const cout = coutBatiment(type, niv, n.ere);
+  const mat = coutMateriaux(type, niv);
   if (n.or < cout) return { ok: false, raison: 'Or insuffisant' };
+  if (n.marchandises.bois < mat.bois) return { ok: false, raison: `Bois insuffisant (${mat.bois} 🪵 requis)` };
+  if (n.marchandises.pierre < mat.pierre) return { ok: false, raison: `Pierre insuffisante (${mat.pierre} 🪨 requise)` };
   n.or -= cout;
+  n.marchandises.bois -= mat.bois;
+  n.marchandises.pierre -= mat.pierre;
   p.batiments[type]++;
   return { ok: true };
 }
 
-const COUT_RECRUE_OR = 8;
-const COUT_RECRUE_NOURRITURE = 4;
-
-function recruter(pid, quantite) {
+function recruter(pid, type, quantite) {
   const p = G.provinces[pid];
   const n = nation(p.proprietaire);
-  const coutOr = COUT_RECRUE_OR * quantite;
-  const coutN = COUT_RECRUE_NOURRITURE * quantite;
-  if (n.or < coutOr) return { ok: false, raison: 'Or insuffisant' };
-  if (n.nourriture < coutN) return { ok: false, raison: 'Nourriture insuffisante' };
-  n.or -= coutOr;
-  n.nourriture -= coutN;
-  p.troupes += quantite;
+  const c = TYPES_UNITES[type].cout;
+  if (n.or < c.or * quantite) return { ok: false, raison: 'Or insuffisant' };
+  if (n.nourriture < c.nourriture * quantite) return { ok: false, raison: 'Nourriture insuffisante' };
+  if (n.marchandises.fer < c.fer * quantite) return { ok: false, raison: `Fer insuffisant (${c.fer * quantite} ⚒️ requis)` };
+  if (n.marchandises.pierre < c.pierre * quantite) return { ok: false, raison: `Pierre insuffisante (${c.pierre * quantite} 🪨 requise)` };
+  n.or -= c.or * quantite;
+  n.nourriture -= c.nourriture * quantite;
+  n.marchandises.fer -= c.fer * quantite;
+  n.marchandises.pierre -= c.pierre * quantite;
+  p.armee[type] += quantite;
+  majTroupes(p);
+  return { ok: true };
+}
+
+// ---------- Production & marché mondial ----------
+function productionMarchandises(nid) {
+  const prod = { bois: 0, fer: 0, pierre: 0, epices: 0 };
+  for (const p of provincesDe(nid)) {
+    const bien = TERRAIN_BIEN[p.terrain];
+    if (bien) prod[bien] += 2 + p.batiments.exploitation * BATIMENTS.exploitation.bonus;
+  }
+  return prod;
+}
+
+function prixAchat(bien) { return Math.ceil(G.marche[bien].prix * 1.1); }
+function prixVente(bien) { return Math.max(1, Math.floor(G.marche[bien].prix * 0.9)); }
+
+function marcheAcheter(nid, bien, quantite) {
+  const n = nation(nid);
+  const cout = prixAchat(bien) * quantite;
+  if (n.or < cout) return { ok: false, raison: 'Or insuffisant' };
+  n.or -= cout;
+  n.marchandises[bien] += quantite;
+  // La demande fait monter le prix
+  G.marche[bien].prix = clamp(G.marche[bien].prix * (1 + 0.005 * quantite), PRIX_MIN, PRIX_MAX);
+  return { ok: true, cout };
+}
+
+function marcheVendre(nid, bien, quantite) {
+  const n = nation(nid);
+  if (n.marchandises[bien] < quantite) return { ok: false, raison: 'Stock insuffisant' };
+  const gain = prixVente(bien) * quantite;
+  n.marchandises[bien] -= quantite;
+  n.or += gain;
+  // L'offre fait baisser le prix
+  G.marche[bien].prix = clamp(G.marche[bien].prix * (1 - 0.005 * quantite), PRIX_MIN, PRIX_MAX);
+  return { ok: true, gain };
+}
+
+function organiserFetes(nid) {
+  const n = nation(nid);
+  if (n.marchandises.epices < COUT_FETES_EPICES) {
+    return { ok: false, raison: `${COUT_FETES_EPICES} 🌶️ épices requises` };
+  }
+  n.marchandises.epices -= COUT_FETES_EPICES;
+  n.stabilite = clamp(n.stabilite + 10, 0, 100);
+  if (n.joueur) journal(`🎉 Grandes fêtes dans tout le royaume ! (+10 stabilité)`);
   return { ok: true };
 }
 
@@ -277,24 +402,27 @@ function peutAttaquer(source, cible) {
 function resoudreAttaque(source, cible) {
   const s = G.provinces[source], c = G.provinces[cible];
   const att = nation(s.proprietaire);
-  const engages = s.troupes - 1; // une garnison reste
-  const puissEre = c.proprietaire >= 0 ? ERES[nation(c.proprietaire).ere].puissance : ERES[0].puissance;
-  const bonusFort = 1 + c.batiments.fort * BATIMENTS.fort.bonus;
+  const engages = extraireArmee(s, s.troupes - 1); // une garnison reste
+  const nbEngages = totalArmee(engages);
+  const ereDef = c.proprietaire >= 0 ? nation(c.proprietaire).ere : 0;
+  // Les armes de siège neutralisent une partie des fortifications
+  const reducSiege = Math.max(0.35, 1 - engages.siege * 0.12);
+  const bonusFort = 1 + c.batiments.fort * BATIMENTS.fort.bonus * reducSiege;
   const bonusTerrain = TERRAINS[c.terrain].defense;
-  const forceAtt = engages * ERES[att.ere].puissance * randF(0.85, 1.2);
-  const forceDef = Math.max(1, c.troupes) * puissEre * bonusFort * bonusTerrain * randF(0.85, 1.2);
+  const forceAtt = forceAttaque(engages, att.ere) * randF(0.85, 1.2);
+  const forceDef = Math.max(1, forceDefense(c.armee, ereDef)) * bonusFort * bonusTerrain * randF(0.85, 1.2);
 
   s.aBouge = true;
   const ratio = forceAtt / forceDef;
   const nomCible = c.nom;
   if (ratio > 1) {
     // Victoire de l'attaquant
-    const pertesAtt = Math.min(engages - 1, Math.round(engages * (0.5 / ratio)));
-    const survivants = engages - pertesAtt;
+    const pertesAtt = Math.min(nbEngages - 1, Math.round(nbEngages * (0.5 / ratio)));
+    retirerComposition(engages, pertesAtt);
     const ancienProprio = c.proprietaire;
-    s.troupes = 1;
     c.proprietaire = s.proprietaire;
-    c.troupes = survivants;
+    c.armee = engages;
+    majTroupes(c);
     c.aBouge = true;
     const etaitCapitale = c.capitale;
     c.capitale = false;
@@ -315,11 +443,12 @@ function resoudreAttaque(source, cible) {
     }
     return { ok: true, victoire: true, pertes: pertesAtt };
   } else {
-    // Défaite : lourdes pertes
-    const pertesAtt = Math.round(engages * clamp(0.4 + (1 - ratio) * 0.5, 0.4, 0.9));
+    // Défaite : lourdes pertes, les survivants rentrent
+    const pertesAtt = Math.round(nbEngages * clamp(0.4 + (1 - ratio) * 0.5, 0.4, 0.9));
     const pertesDef = Math.round(c.troupes * clamp(ratio * 0.4, 0.05, 0.5));
-    s.troupes = Math.max(1, s.troupes - pertesAtt);
-    c.troupes = Math.max(1, c.troupes - pertesDef);
+    retirerComposition(engages, pertesAtt);
+    ajouterArmee(s, engages);
+    if (c.troupes - pertesDef >= 1) retirerUnites(c, pertesDef);
     journal(`🛡️ ${nomCible} repousse l'assaut de ${att.nom}.`);
     return { ok: true, victoire: false, pertes: pertesAtt };
   }
@@ -330,8 +459,7 @@ function deplacerTroupes(source, cible, quantite) {
   if (s.proprietaire !== c.proprietaire) return { ok: false };
   if (!voisinsHex(s.col, s.row).includes(cible)) return { ok: false };
   if (s.aBouge || quantite >= s.troupes) return { ok: false, raison: 'Une garnison doit rester' };
-  s.troupes -= quantite;
-  c.troupes += quantite;
+  ajouterArmee(c, extraireArmee(s, quantite));
   s.aBouge = true;
   return { ok: true };
 }
@@ -343,10 +471,12 @@ function verifierElimination(nid) {
     n.guerres = [];
     n.alliances = [];
     n.pactes = [];
+    n.accords = [];
     for (const autre of G.nations) {
       autre.guerres = autre.guerres.filter(x => x !== nid);
       autre.alliances = autre.alliances.filter(x => x !== nid);
       autre.pactes = autre.pactes.filter(x => x !== nid);
+      autre.accords = autre.accords.filter(x => x !== nid);
       if (autre.vassalDe === nid) autre.vassalDe = -1;
     }
     journal(`💀 ${n.nom} a été rayé de la carte.`);
@@ -366,6 +496,12 @@ function declarerGuerre(a, b) {
   if (estVassal(b, a) || estVassal(a, b)) return { ok: false, raison: 'Lien de vassalité' };
   nation(a).guerres.push(b);
   nation(b).guerres.push(a);
+  // La guerre rompt tout accord commercial
+  if (aAccord(a, b)) {
+    nation(a).accords = nation(a).accords.filter(x => x !== b);
+    nation(b).accords = nation(b).accords.filter(x => x !== a);
+    journal(`💸 L'accord commercial entre ${nation(a).nom} et ${nation(b).nom} est rompu.`);
+  }
   modifierRelation(a, b, -40);
   nation(a).stabilite -= 5;
   journal(`⚡ ${nation(a).nom} déclare la guerre à ${nation(b).nom} !`);
@@ -444,6 +580,26 @@ function proposerPacte(a, b) {
   return { ok: true };
 }
 
+function aAccord(a, b) { return nation(a).accords.includes(b); }
+
+function proposerAccordCommercial(a, b) {
+  if (aAccord(a, b)) return { ok: false };
+  if (enGuerre(a, b)) return { ok: false, raison: 'Impossible en temps de guerre' };
+  const cible = nation(b);
+  if (!cible.joueur) {
+    const perso = PERSONNALITES[cible.perso];
+    const seuil = 20 - perso.commerce * 15;
+    if (cible.relations[a] < seuil) {
+      return { ok: false, raison: `${cible.nom} refuse de commercer (relations ${cible.relations[a]}, ${seuil} requis).` };
+    }
+  }
+  nation(a).accords.push(b);
+  nation(b).accords.push(a);
+  modifierRelation(a, b, 12);
+  journal(`💱 Accord commercial entre ${nation(a).nom} et ${nation(b).nom} (+8 💰/tour chacun).`);
+  return { ok: true };
+}
+
 function envoyerCadeau(a, b, montant) {
   const n = nation(a);
   if (n.or < montant) return { ok: false, raison: 'Or insuffisant' };
@@ -518,7 +674,9 @@ function appliquerChoix(evenement, indexChoix) {
     const miennes = provincesDe(G.joueur);
     if (miennes.length) {
       const p = pick(miennes);
-      p.troupes = Math.max(0, p.troupes + eff.troupes);
+      if (eff.troupes > 0) p.armee.inf += eff.troupes;
+      else retirerUnites(p, -eff.troupes);
+      majTroupes(p);
     }
   }
   if (eff.relationsTous) {
@@ -539,19 +697,22 @@ function finDeTour() {
     iaJouerTour(n.id);
   }
 
-  // 2. Économie et science pour tous
+  // 2. Économie, production et science pour tous
   for (const n of G.nations) {
     if (!n.vivante) continue;
     const rev = revenus(n.id);
     n.or = Math.max(0, n.or + rev.or);
     n.nourriture += rev.nourriture;
     n.science += Math.max(0, rev.science);
+    // Production de marchandises
+    const prod = productionMarchandises(n.id);
+    for (const bien of Object.keys(MARCHANDISES)) n.marchandises[bien] += prod[bien];
     // Famine
     if (n.nourriture < 0) {
       n.nourriture = 0;
       n.stabilite -= 8;
       const miennes = provincesDe(n.id).filter(p => p.troupes > 1);
-      if (miennes.length) { pick(miennes).troupes -= 1; }
+      if (miennes.length) { retirerUnites(pick(miennes), 1); }
       if (n.joueur) evenementsTour.push('⚠️ Famine ! Votre peuple souffre (stabilité et troupes en baisse).');
     }
     // Stabilité se régénère lentement en paix
@@ -563,7 +724,8 @@ function finDeTour() {
       if (miennes.length) {
         const p = pick(miennes);
         p.proprietaire = -1;
-        p.troupes = 4 + rand(4);
+        p.armee = { inf: 4 + rand(4), choc: 0, siege: 0 };
+        majTroupes(p);
         journal(`🔥 Révolte à ${p.nom} ! La province fait sécession de ${n.nom}.`);
         verifierElimination(n.id);
       }
@@ -597,7 +759,14 @@ function finDeTour() {
     }
   }
 
-  // 4. Réinitialiser les mouvements
+  // 4. Fluctuation naturelle des prix du marché
+  for (const bien of Object.keys(MARCHANDISES)) {
+    const m = G.marche[bien];
+    // Marche aléatoire + rappel vers le prix de base
+    m.prix = clamp(m.prix * randF(0.95, 1.05) + (MARCHANDISES[bien].prixBase - m.prix) * 0.05, PRIX_MIN, PRIX_MAX);
+  }
+
+  // 5. Réinitialiser les mouvements
   for (const p of G.provinces) p.aBouge = false;
 
   // 4. Avancer le temps
@@ -665,8 +834,24 @@ function charger() {
     const brut = localStorage.getItem(CLE_SAUVEGARDE);
     if (!brut) return false;
     G = JSON.parse(brut);
+    migrerSauvegarde();
     return true;
   } catch (e) { return false; }
+}
+
+// Compatibilité avec les sauvegardes d'avant le système économique
+function migrerSauvegarde() {
+  if (!G.marche) {
+    G.marche = Object.fromEntries(Object.entries(MARCHANDISES).map(([k, m]) => [k, { prix: m.prixBase }]));
+  }
+  for (const n of G.nations) {
+    if (!n.marchandises) n.marchandises = { bois: 30, fer: 20, pierre: 20, epices: 10 };
+    if (!n.accords) n.accords = [];
+  }
+  for (const p of G.provinces) {
+    if (!p.armee) p.armee = { inf: p.troupes || 0, choc: 0, siege: 0 };
+    if (p.batiments.exploitation === undefined) p.batiments.exploitation = 0;
+  }
 }
 
 function sauvegardeExiste() {

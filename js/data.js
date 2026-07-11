@@ -23,6 +23,40 @@ const ERES = [
 // Projet de victoire scientifique (disponible à l'ère futuriste)
 const PROJET_ASCENSION = { nom: 'Ascension Stellaire', cout: 4000, tours: 10 };
 
+// ---- Types d'unités (noms par ère) ----
+// attaque/defense : multiplicateurs de force. Le siège réduit l'effet des forteresses.
+const TYPES_UNITES = {
+  inf: {
+    icone: '🗡️', attaque: 1.0, defense: 1.0,
+    noms: ['Piquiers', 'Mousquetaires', 'Fusiliers', 'Infanterie mécanisée', 'Exo-soldats'],
+    cout: { or: 8, nourriture: 4, fer: 1, pierre: 0 },
+  },
+  choc: {
+    icone: '🐎', attaque: 1.6, defense: 1.2,
+    noms: ['Chevaliers', 'Cuirassiers', 'Cavalerie lourde', 'Chars d\'assaut', 'Mechas de combat'],
+    cout: { or: 14, nourriture: 5, fer: 3, pierre: 0 },
+  },
+  siege: {
+    icone: '💣', attaque: 0.8, defense: 0.5,
+    noms: ['Trébuchets', 'Canons', 'Artillerie', 'Lance-missiles', 'Canons à plasma'],
+    cout: { or: 16, nourriture: 2, fer: 2, pierre: 3 },
+  },
+};
+
+// ---- Marchandises (production, commerce) ----
+const MARCHANDISES = {
+  bois:   { nom: 'Bois',   icone: '🪵', prixBase: 4 },
+  fer:    { nom: 'Fer',    icone: '⚒️', prixBase: 6 },
+  pierre: { nom: 'Pierre', icone: '🪨', prixBase: 5 },
+  epices: { nom: 'Épices', icone: '🌶️', prixBase: 9 },
+};
+
+// Bien produit par chaque terrain (2/tour + bonus d'exploitation)
+const TERRAIN_BIEN = { foret: 'bois', montagne: 'fer', colline: 'pierre', desert: 'epices' };
+
+const PRIX_MIN = 1, PRIX_MAX = 25;
+const COUT_FETES_EPICES = 20; // 20 épices → +10 stabilité
+
 const PERSONNALITES = {
   conquerant:   { nom: 'Conquérant',   agression: 0.9, diplomatie: 0.2, commerce: 0.4, science: 0.3 },
   diplomate:    { nom: 'Diplomate',    agression: 0.2, diplomatie: 0.9, commerce: 0.6, science: 0.5 },
@@ -43,11 +77,13 @@ const NATIONS_DEFS = [
   { nom: 'Dominion de Nyx',      couleur: '#5d6d7e', perso: 'conquerant' },
 ];
 
+// Coûts en matériaux : bois pour tout bâtiment, pierre en plus pour les forts
 const BATIMENTS = {
-  ferme:  { nom: 'Ferme',       icone: '🌾', effet: 'nourriture', bonus: 3, coutBase: 40 },
-  marche: { nom: 'Marché',      icone: '💰', effet: 'or',         bonus: 3, coutBase: 50 },
-  ecole:  { nom: 'Académie',    icone: '📚', effet: 'science',    bonus: 3, coutBase: 60 },
-  fort:   { nom: 'Forteresse',  icone: '🏰', effet: 'defense',    bonus: 0.35, coutBase: 70 },
+  ferme:  { nom: 'Ferme',        icone: '🌾', effet: 'nourriture',  bonus: 3, coutBase: 40, bois: 8,  pierre: 0 },
+  marche: { nom: 'Marché',       icone: '💰', effet: 'or',          bonus: 3, coutBase: 50, bois: 8,  pierre: 0 },
+  ecole:  { nom: 'Académie',     icone: '📚', effet: 'science',     bonus: 3, coutBase: 60, bois: 10, pierre: 0 },
+  fort:   { nom: 'Forteresse',   icone: '🏰', effet: 'defense',     bonus: 0.35, coutBase: 70, bois: 6, pierre: 12 },
+  exploitation: { nom: 'Exploitation', icone: '⚒️', effet: 'marchandise', bonus: 2, coutBase: 45, bois: 6, pierre: 0 },
 };
 const NIVEAU_MAX_BATIMENT = 3;
 
@@ -57,6 +93,7 @@ const NOMS_BATIMENTS_PAR_ERE = {
   marche: ['Marché', 'Comptoir', 'Bourse', 'Centre financier', 'Nexus commercial'],
   ecole:  ['Monastère', 'Université', 'Institut', 'Laboratoire', 'Centre quantique'],
   fort:   ['Forteresse', 'Citadelle', 'Bastion', 'Base militaire', 'Bouclier orbital'],
+  exploitation: ['Atelier', 'Manufacture', 'Usine', 'Complexe industriel', 'Nano-fabrique'],
 };
 
 // ---- Événements à choix (style Crusader Kings) ----
