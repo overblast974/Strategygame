@@ -16,12 +16,14 @@ La partie est **sauvegardée automatiquement** à chaque fin de tour (localStora
 
 | Système | Détails |
 |---|---|
-| **Carte** | ~190 provinces hexagonales générées aléatoirement (plaines, forêts, collines, montagnes, déserts, mers). Pan au doigt, pinch pour zoomer. |
-| **8 nations** | Chacune avec une personnalité d'IA : conquérant, diplomate, marchand, savant, opportuniste, expansionniste. |
+| **Carte** | Monde façon Terre de ~570 provinces hexagonales : continents générés procéduralement séparés par des océans, déserts vers l'équateur, toundra aux pôles, eaux côtières. Pan au doigt, pinch pour zoomer. |
+| **12 nations** | Chacune avec une personnalité d'IA : conquérant, diplomate, marchand, savant, opportuniste, expansionniste. |
+| **Cités-états** 🏛️ | 7 cités libres fortifiées (Byzance, Samarkande, Palmyre…) annexables par la négociation (contre de l'or, si votre territoire les borde) ou par la force. |
+| **Mercenaires** 🏴 | 3 compagnies libres à engager contre de l'or (Lames Noires, Compagnie du Faucon…), renouvelées tous les 6 tours. Les IA en guerre les embauchent aussi. |
 | **5 ères** | Moyen Âge → Renaissance → Industrielle → Moderne → Futuriste. Les unités évoluent (chevaliers → mousquetaires → fusiliers → blindés → mechas) ainsi que les bâtiments. |
 | **Guerre** | Déclaration de guerre, conquête province par province, bonus de terrain et de forteresse, garnisons, capitales. Les alliés rejoignent les guerres défensives. |
 | **Armées** | 3 types d'unités à acheter, aux noms évoluant par ère : infanterie 🗡️, choc 🐎 (chevaliers → chars → mechas, +60 % attaque) et siège 💣 (trébuchets → artillerie, neutralise les forteresses). |
-| **Diplomatie** | Relations dynamiques, alliances, pactes de non-agression, accords commerciaux, cadeaux, tributs, vassalisation, négociation de paix (avec compensation en or). |
+| **Diplomatie** | Relations dynamiques, alliances, pactes de non-agression, accords commerciaux, achat direct de ressources (−10 % du marché), tribut sous la menace (gare au retour de flamme…), cadeaux, vassalisation, négociation de paix. |
 | **Économie** | Or, nourriture, science, stabilité. Constructions améliorables : fermes, marchés, académies, forteresses, exploitations. Famines, révoltes, entretien des armées. |
 | **Production & commerce** | 4 marchandises produites par le terrain : 🪵 bois (forêts), ⚒️ fer (montagnes), 🪨 pierre (collines), 🌶️ épices (déserts). Le fer équipe les unités, le bois et la pierre servent aux bâtiments, les épices remontent la stabilité. **Marché mondial à prix dynamiques** (l'offre et la demande — y compris celles des IA — font bouger les cours) et accords commerciaux entre nations (+8 💰/tour chacun). |
 | **Événements** | Événements narratifs à choix multiples adaptés à votre ère (mariage princier, peste, grève ouvrière, IA émergente…). |

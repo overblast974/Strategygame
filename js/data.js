@@ -9,19 +9,20 @@ const TERRAINS = {
   colline:  { nom: 'Colline',  couleur: '#9a8f5f', nourriture: 2, or: 3, science: 1, defense: 1.3 },
   montagne: { nom: 'Montagne', couleur: '#7d7468', nourriture: 1, or: 3, science: 2, defense: 1.6 },
   desert:   { nom: 'Désert',   couleur: '#c9b077', nourriture: 1, or: 2, science: 1, defense: 1.1 },
+  toundra:  { nom: 'Toundra',  couleur: '#aebfc4', nourriture: 1, or: 1, science: 1, defense: 1.2 },
   eau:      { nom: 'Mer',      couleur: '#3d6e8f', nourriture: 0, or: 0, science: 0, defense: 1.0 },
 };
 
 const ERES = [
-  { id: 0, nom: 'Moyen Âge',       seuil: 0,    anneesParTour: 15, unite: 'Chevaliers',        puissance: 1.0, icone: '⚔️' },
-  { id: 1, nom: 'Renaissance',     seuil: 400,  anneesParTour: 12, unite: 'Mousquetaires',     puissance: 1.6, icone: '🛡️' },
-  { id: 2, nom: 'Ère Industrielle',seuil: 1100, anneesParTour: 8,  unite: 'Fusiliers',         puissance: 2.6, icone: '🏭' },
-  { id: 3, nom: 'Ère Moderne',     seuil: 2500, anneesParTour: 6,  unite: 'Divisions blindées', puissance: 4.2, icone: '🚀' },
-  { id: 4, nom: 'Ère Futuriste',   seuil: 5500, anneesParTour: 4,  unite: 'Mechas de combat',  puissance: 7.0, icone: '🤖' },
+  { id: 0, nom: 'Moyen Âge',       seuil: 0,     anneesParTour: 15, unite: 'Chevaliers',        puissance: 1.0, icone: '⚔️' },
+  { id: 1, nom: 'Renaissance',     seuil: 1000,  anneesParTour: 12, unite: 'Mousquetaires',     puissance: 1.6, icone: '🛡️' },
+  { id: 2, nom: 'Ère Industrielle',seuil: 2800,  anneesParTour: 8,  unite: 'Fusiliers',         puissance: 2.6, icone: '🏭' },
+  { id: 3, nom: 'Ère Moderne',     seuil: 6500,  anneesParTour: 6,  unite: 'Divisions blindées', puissance: 4.2, icone: '🚀' },
+  { id: 4, nom: 'Ère Futuriste',   seuil: 14000, anneesParTour: 4,  unite: 'Mechas de combat',  puissance: 7.0, icone: '🤖' },
 ];
 
 // Projet de victoire scientifique (disponible à l'ère futuriste)
-const PROJET_ASCENSION = { nom: 'Ascension Stellaire', cout: 4000, tours: 10 };
+const PROJET_ASCENSION = { nom: 'Ascension Stellaire', cout: 10000, tours: 10 };
 
 // ---- Types d'unités (noms par ère) ----
 // attaque/defense : multiplicateurs de force. Le siège réduit l'effet des forteresses.
@@ -75,7 +76,23 @@ const NATIONS_DEFS = [
   { nom: 'Horde de Drakmar',     couleur: '#d35400', perso: 'opportuniste' },
   { nom: 'Confédération d\'Ys',  couleur: '#27ae60', perso: 'diplomate' },
   { nom: 'Dominion de Nyx',      couleur: '#5d6d7e', perso: 'conquerant' },
+  { nom: 'Tsarat de Volkograd',  couleur: '#7f6690', perso: 'expansionniste' },
+  { nom: 'Sultanat d\'Ormuz',    couleur: '#b3812e', perso: 'marchand' },
+  { nom: 'Royaume de Kaelis',    couleur: '#4aa3a3', perso: 'diplomate' },
+  { nom: 'Empire de Xin-Lao',    couleur: '#a83f6b', perso: 'savant' },
 ];
+
+// ---- Mercenaires (compagnies libres) ----
+const NOMS_MERCENAIRES = [
+  'Compagnie du Faucon', 'Lames Noires', 'Boucliers d\'Argent', 'Loups des Steppes',
+  'Garde Écarlate', 'Frères du Serpent', 'Corbeaux de Fer', 'Épées du Levant',
+  'Bannière Grise', 'Chiens de Guerre', 'Fils du Tonnerre', 'Compagnie Dorée',
+];
+const TOURS_ROTATION_MERCENAIRES = 6; // renouvellement des compagnies
+
+// ---- Cités-états indépendantes ----
+const NB_CITES_ETATS = 7;
+const NOMS_CITES = ['Vénara', 'Ashkelon', 'Tyrshan', 'Novgard', 'Qadesh', 'Palmyre', 'Byzance', 'Cartha', 'Ilion', 'Samarkande'];
 
 // Coûts en matériaux : bois pour tout bâtiment, pierre en plus pour les forts
 const BATIMENTS = {

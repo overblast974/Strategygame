@@ -90,7 +90,7 @@ function areteVers(pts, cVoisin) {
   return [tri[0].pt, tri[1].pt];
 }
 
-const DECOR_TERRAIN = { foret: '🌲', montagne: '⛰️', desert: '🌵', colline: '🌿' };
+const DECOR_TERRAIN = { foret: '🌲', montagne: '⛰️', desert: '🌵', colline: '🌿', toundra: '❄️' };
 
 // ---------- Initialisation PixiJS ----------
 function initPixi() {
@@ -151,7 +151,12 @@ function construireCarteStatique() {
 
     if (p.terrain === 'eau') {
       const pts = hexSommets(c.x, c.y, s + 0.5);
-      gEau.beginFill(h < 0.33 ? 0x2e5a7a : h < 0.66 ? 0x31607f : 0x2b5573);
+      // Eaux côtières plus claires, océan profond plus sombre
+      const cotier = voisinsHex(p.col, p.row).some(i => G.provinces[i].terrain !== 'eau');
+      const teinte = cotier
+        ? (h < 0.5 ? 0x3c6f92 : 0x407598)
+        : (h < 0.33 ? 0x28506e : h < 0.66 ? 0x2b5573 : 0x254a66);
+      gEau.beginFill(teinte);
       gEau.drawPolygon(pts.flat());
       gEau.endFill();
       if (h > 0.45) {
@@ -275,10 +280,11 @@ function dessiner() {
     }
     gFro.lineStyle(0);
 
-    // Icônes capitale / forteresse (pool)
+    // Icônes capitale / cité-état / forteresse (pool)
     let icones = '';
     if (p.capitale) icones += '👑';
-    if (p.batiments.fort > 0) icones += '🏰';
+    if (p.citeEtat) icones += '🏛️';
+    if (p.batiments.fort > 0 && !p.citeEtat) icones += '🏰';
     let icoTxt = UI.pool.icones.get(p.id);
     if (icones) {
       if (!icoTxt) {
@@ -461,7 +467,7 @@ function initGestes() {
 
 function zoomVers(px, py, facteur) {
   const avant = ecranVersMonde(px, py);
-  UI.cam.zoom = clamp(UI.cam.zoom * facteur, 0.35, 2.5);
+  UI.cam.zoom = clamp(UI.cam.zoom * facteur, 0.14, 2.5);
   UI.cam.x = px - avant.x * UI.cam.zoom;
   UI.cam.y = py - avant.y * UI.cam.zoom;
 }
@@ -536,7 +542,7 @@ function afficherPanneauProvince(pid) {
   let html = `<div class="pp-titre">
     <span class="pastille" style="background:${n ? n.couleur : '#777'}"></span>
     <b>${p.nom}</b> ${p.capitale ? '★' : ''}
-    <span class="pp-sous">${t.nom} · ${n ? n.nom : 'Indépendante'}</span>
+    <span class="pp-sous">${t.nom} · ${n ? n.nom : (p.citeEtat ? '🏛️ Cité-état libre' : 'Indépendante')}</span>
     <button class="fermer" onclick="deselectionner()">✕</button>
   </div>
   <div class="pp-stats">
@@ -579,12 +585,29 @@ function afficherPanneauProvince(pid) {
     html += `<div class="pp-actions">
       <button class="btn" onclick="ouvrirDiplomatieAvec(${n.id})">🕊️ Diplomatie avec ${n.nom}</button>
     </div>`;
+  } else if (p.citeEtat) {
+    const cout = coutAnnexionCite(p);
+    const adjacente = voisinsHex(p.col, p.row).some(i => G.provinces[i].proprietaire === G.joueur);
+    html += `<div class="pp-actions">
+      <button class="btn btn-principal" style="flex:1" ${adjacente ? '' : 'disabled'} onclick="uiAnnexerCite(${pid})">
+        🏛️ Négocier le rattachement<br><small>${cout} 💰${adjacente ? '' : ' · votre territoire doit border la cité'}</small>
+      </button>
+    </div>
+    <div class="pp-aide">Cité-état indépendante : annexable par la négociation… ou par la force.</div>`;
   } else {
     html += `<div class="pp-aide">Province indépendante — attaquable sans déclaration de guerre.</div>`;
   }
 
   el.innerHTML = html;
   el.classList.add('ouvert');
+}
+
+function uiAnnexerCite(pid) {
+  const r = annexerCiteEtat(G.joueur, pid);
+  if (!r.ok) { toast(r.raison || 'Impossible'); return; }
+  toast(`🏛️ ${G.provinces[pid].nom} rejoint votre nation !`);
+  deselectionner();
+  majTout();
 }
 
 function uiRecruter(pid, type, q) {
@@ -727,7 +750,9 @@ function ouvrirDiplomatieAvec(nid) {
     else boutons += `<button class="btn btn-danger" onclick="uiDiplo('rompre',${nid})">💔 Rompre l'alliance</button>`;
     if (!pacte && !allie) boutons += `<button class="btn" onclick="uiDiplo('pacte',${nid})">📜 Pacte de non-agression</button>`;
     if (!aAccord(G.joueur, nid)) boutons += `<button class="btn" onclick="uiDiplo('accord',${nid})">💱 Accord commercial (+8 💰/tour chacun)</button>`;
+    boutons += `<button class="btn" onclick="ouvrirAchatRessources(${nid})">🛒 Acheter des ressources (−10 % du marché)</button>`;
     boutons += `<button class="btn" onclick="uiDiplo('cadeau',${nid},50)">🎁 Cadeau (50 💰)</button>`;
+    boutons += `<button class="btn btn-danger" onclick="uiDiplo('tribut',${nid})">🪙 Exiger un tribut (menace)</button>`;
     if (!monVassal && moi.vassalDe === -1) boutons += `<button class="btn" onclick="uiDiplo('vassal',${nid})">👑 Exiger la vassalité</button>`;
     if (monVassal) boutons += `<button class="btn" onclick="uiDiplo('liberer',${nid})">🕊️ Libérer ce vassal</button>`;
     if (!allie && !pacte && !monVassal) boutons += `<button class="btn btn-danger" onclick="uiDiplo('guerre',${nid})">⚡ Déclarer la guerre</button>`;
@@ -747,6 +772,10 @@ function uiDiplo(action, nid, montant = 0) {
     case 'rompre': romprAlliance(G.joueur, nid); r = { ok: true }; break;
     case 'pacte': r = proposerPacte(G.joueur, nid); break;
     case 'accord': r = proposerAccordCommercial(G.joueur, nid); break;
+    case 'tribut': r = exigerTribut(G.joueur, nid);
+      if (r.ok) toast(`🪙 Tribut de ${r.tribut} 💰 obtenu !`);
+      break;
+    case 'achatRessource': r = acheterRessourceNation(G.joueur, nid, montant); break;
     case 'cadeau': r = envoyerCadeau(G.joueur, nid, montant); break;
     case 'vassal': r = demanderVassalite(G.joueur, nid); break;
     case 'liberer': r = liberer(G.joueur, nid); break;
@@ -778,6 +807,20 @@ function ouvrirCommerce() {
   }
   html += `</div>
     <button class="btn" style="width:100%" onclick="uiFetes()">🎉 Organiser des fêtes (${COUT_FETES_EPICES} 🌶️ → +10 🏛️ stabilité)</button>
+    <h3 class="titre-section">🏴 Compagnies de mercenaires</h3>`;
+  if (G.mercenaires.length === 0) {
+    html += `<p><small>Aucune compagnie disponible pour l'instant — elles reviennent régulièrement.</small></p>`;
+  }
+  G.mercenaires.forEach((cie, i) => {
+    html += `<div class="ligne-bien">
+      <div class="lb-info">
+        <b>${cie.nom}</b>
+        <small>${TYPES_UNITES.inf.icone}${cie.inf} ${TYPES_UNITES.choc.icone}${cie.choc} ${TYPES_UNITES.siege.icone}${cie.siege} — déployés dans votre capitale</small>
+      </div>
+      <button class="btn btn-mini btn-principal" onclick="uiEmbaucher(${i})">Engager<br><small>${cie.cout}💰</small></button>
+    </div>`;
+  });
+  html += `<p style="margin-top:6px"><small>Les compagnies changent tous les ${TOURS_ROTATION_MERCENAIRES} tours. Vos rivaux peuvent aussi les engager…</small></p>
     <p style="margin-top:10px"><small>💱 Accords commerciaux actifs : ${moi.accords.filter(a => nation(a).vivante).length}
     (+${revenus(G.joueur).commerce || 0} 💰/tour) — négociez-en via la Diplomatie.<br>
     ⚒️ Le fer équipe vos unités · 🪵 le bois et 🪨 la pierre servent aux bâtiments · 🌶️ les épices font la fête.</small></p>
@@ -798,6 +841,32 @@ function uiFetes() {
   else toast('🎉 Le peuple festoie ! (+10 stabilité)');
   majBarre();
   ouvrirCommerce();
+}
+
+function uiEmbaucher(index) {
+  const cie = G.mercenaires[index];
+  const r = embaucherMercenaires(G.joueur, index);
+  if (!r.ok) { toast(r.raison || 'Impossible'); ouvrirCommerce(); return; }
+  toast(`🏴 La ${cie.nom} rejoint vos rangs !`);
+  majTout();
+  ouvrirCommerce();
+}
+
+// Sous-écran : acheter 20 unités d'un bien à une nation
+function ouvrirAchatRessources(nid) {
+  const vendeur = nation(nid);
+  let boutons = '';
+  for (const [bien, def] of Object.entries(MARCHANDISES)) {
+    const dispo = vendeur.marchandises[bien] >= 40;
+    const prix = Math.ceil(G.marche[bien].prix * 0.9 * 20);
+    boutons += `<button class="btn btn-choix" ${dispo ? '' : 'disabled'} onclick="uiDiplo('achatRessource',${nid},'${bien}')">
+      ${def.icone} 20 ${def.nom}<br><small>${dispo ? prix + ' 💰 (marché −10 %)' : 'stock insuffisant chez eux'}</small>
+    </button>`;
+  }
+  ouvrirModale(`<h2>🛒 Acheter à ${vendeur.nom}</h2>
+    <p>Achat direct de ressources, 10 % sous le cours mondial. Améliore légèrement vos relations.</p>
+    <div class="colonne-btn">${boutons}</div>
+    <div class="rangee-btn"><button class="btn" onclick="ouvrirDiplomatieAvec(${nid})">← Retour</button></div>`);
 }
 
 // ---------- Technologie ----------

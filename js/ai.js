@@ -22,7 +22,22 @@ function iaJouerTour(nid) {
   // ---- 4. Recruter ----
   iaRecruter(nid, perso, miennes);
 
-  // ---- 4. Guerre : attaquer / consolider ----
+  // ---- 5. Mercenaires : renfort en temps de guerre ----
+  if (n.guerres.length > 0 && Math.random() < 0.35) {
+    const idx = G.mercenaires.findIndex(c => c.cout * 1.5 < n.or);
+    if (idx >= 0) embaucherMercenaires(nid, idx);
+  }
+
+  // ---- 6. Cités-états : annexion pacifique si le trésor le permet ----
+  if (n.or > 400 && Math.random() < 0.3) {
+    for (const p of miennes) {
+      const cite = voisinsHex(p.col, p.row).map(i => G.provinces[i])
+        .find(v => v.citeEtat && v.proprietaire === -1);
+      if (cite) { annexerCiteEtat(nid, cite.id); break; }
+    }
+  }
+
+  // ---- 7. Guerre : attaquer / consolider ----
   iaMilitaire(nid, perso, miennes);
 
   // ---- 5. Projet Ascension ----

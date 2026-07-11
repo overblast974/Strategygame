@@ -122,6 +122,7 @@ button { font-family: inherit; cursor: pointer; }
 .btn-mini { padding: 8px 10px; font-size: 12px; }
 .btn-mini small { font-size: 10px; display: block; }
 .liste-biens { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.titre-section { color: #ffe9a0; font-size: 15px; margin: 14px 0 8px; }
 .pp-aide { margin-top: 10px; font-size: 11px; color: #9db2c7; text-align: center; }
 
 /* ---------- Boutons génériques ---------- */

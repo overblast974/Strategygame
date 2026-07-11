@@ -4,8 +4,8 @@
 // ============================================================
 'use strict';
 
-const MAP_W = 16;
-const MAP_H = 12;
+let MAP_W = 22;
+let MAP_H = 26;
 const ANNEE_DEPART = 1000;
 
 let G = null; // état global de la partie
@@ -34,20 +34,59 @@ function voisinsHex(col, row) {
   return res;
 }
 
-// ---------- Génération de la carte ----------
+// ---------- Génération de la carte (monde façon Terre) ----------
+// Continents = somme de "masses continentales" gaussiennes, séparées par des océans.
+// Climat par latitude : toundra aux pôles, déserts vers l'équateur.
 function genererCarte() {
+  // 1. Relief : masses continentales espacées les unes des autres,
+  //    pour dessiner de vrais continents séparés par des océans
+  const nbContinents = 5 + rand(3);
+  const blobs = [];
+  for (let i = 0; i < nbContinents; i++) {
+    let meilleur = null, meilleureDist = -1;
+    for (let essai = 0; essai < 40; essai++) {
+      const cand = {
+        x: 3.5 + Math.random() * (MAP_W - 7),
+        y: 3 + Math.random() * (MAP_H - 6),
+        rayon: 2.2 + Math.random() * 2.4,
+        amp: 0.85 + Math.random() * 0.4,
+      };
+      let dMin = Infinity;
+      for (const b of blobs) dMin = Math.min(dMin, Math.hypot(cand.x - b.x, cand.y - b.y));
+      if (blobs.length === 0) dMin = 100;
+      if (dMin > meilleureDist) { meilleureDist = dMin; meilleur = cand; }
+    }
+    blobs.push(meilleur);
+  }
+  const elevation = (c, r) => {
+    let e = 0;
+    for (const b of blobs) {
+      const d2 = (c - b.x) ** 2 + (r - b.y) ** 2;
+      e += b.amp * Math.exp(-d2 / (2 * b.rayon * b.rayon));
+    }
+    return e + (Math.random() - 0.5) * 0.18;
+  };
+
   const provinces = [];
   for (let r = 0; r < MAP_H; r++) {
     for (let c = 0; c < MAP_W; c++) {
       const id = r * MAP_W + c;
-      // Bordures = mer, plus quelques lacs
       const bord = c === 0 || r === 0 || c === MAP_W - 1 || r === MAP_H - 1;
+      const e = bord ? 0 : elevation(c, r);
+      const lat = Math.abs(r - (MAP_H - 1) / 2) / ((MAP_H - 1) / 2); // 0 = équateur, 1 = pôle
+
       let terrain;
-      if (bord || Math.random() < 0.08) {
+      if (e < 0.54) {
         terrain = 'eau';
+      } else if (e > 1.0 && Math.random() < 0.7) {
+        terrain = 'montagne';
+      } else if (lat > 0.78) {
+        terrain = Math.random() < 0.75 ? 'toundra' : 'foret';
+      } else if (lat < 0.28 && Math.random() < 0.5) {
+        terrain = 'desert';
       } else {
         const roll = Math.random();
-        terrain = roll < 0.34 ? 'plaine' : roll < 0.54 ? 'foret' : roll < 0.72 ? 'colline' : roll < 0.87 ? 'montagne' : 'desert';
+        terrain = roll < 0.36 ? 'plaine' : roll < 0.62 ? 'foret' : roll < 0.85 ? 'colline' : 'montagne';
       }
       provinces.push({
         id, col: c, row: r, terrain,
@@ -58,14 +97,19 @@ function genererCarte() {
         aBouge: false,             // l'armée a déjà agi ce tour
         batiments: { ferme: 0, marche: 0, ecole: 0, fort: 0, exploitation: 0 },
         capitale: false,
+        citeEtat: false,
       });
     }
   }
-  // Lissage : éviter les cases d'eau isolées au milieu
+  // Lissage : supprimer les îlots d'une case et les lacs d'une case
   for (const p of provinces) {
-    if (p.terrain === 'eau' && !(p.col === 0 || p.row === 0 || p.col === MAP_W - 1 || p.row === MAP_H - 1)) {
-      const vEau = voisinsHex(p.col, p.row).filter(i => provinces[i].terrain === 'eau').length;
-      if (vEau === 0 && Math.random() < 0.5) { p.terrain = 'plaine'; p.nom = nomProvince(); }
+    if (p.col === 0 || p.row === 0 || p.col === MAP_W - 1 || p.row === MAP_H - 1) continue;
+    const vEau = voisinsHex(p.col, p.row).filter(i => provinces[i].terrain === 'eau').length;
+    const vTot = voisinsHex(p.col, p.row).length;
+    if (p.terrain === 'eau' && vEau === 0 && Math.random() < 0.6) {
+      p.terrain = 'plaine'; p.nom = nomProvince();
+    } else if (p.terrain !== 'eau' && vEau === vTot && Math.random() < 0.5) {
+      p.terrain = 'eau'; p.nom = '';
     }
   }
   return provinces;
@@ -135,10 +179,24 @@ function placerNations(provinces, nations) {
       majTroupes(p);
     }
   }
+  // Cités-états : indépendantes, riches et fortifiées — annexables par la négociation
+  const libres = provinces.filter(p => p.terrain !== 'eau' && p.proprietaire === -1 && !['montagne', 'toundra'].includes(p.terrain));
+  const nomsCites = [...NOMS_CITES];
+  for (let i = 0; i < NB_CITES_ETATS && libres.length; i++) {
+    const p = libres.splice(rand(libres.length), 1)[0];
+    p.citeEtat = true;
+    p.nom = nomsCites.length ? nomsCites.splice(rand(nomsCites.length), 1)[0] : p.nom;
+    p.armee = { inf: 7 + rand(5), choc: 2, siege: 0 };
+    majTroupes(p);
+    p.batiments.fort = 1;
+    p.batiments.marche = 1;
+  }
 }
 
 // ---------- Nouvelle partie ----------
 function nouvellePartie(nationJoueur) {
+  MAP_W = 22; // dimensions du monde actuel (les sauvegardes anciennes peuvent différer)
+  MAP_H = 26;
   const nations = NATIONS_DEFS.map((def, i) => ({
     id: i,
     nom: def.nom,
@@ -175,7 +233,11 @@ function nouvellePartie(nationJoueur) {
     fini: false,
     message: null,
     marche: Object.fromEntries(Object.entries(MARCHANDISES).map(([k, m]) => [k, { prix: m.prixBase }])),
+    mercenaires: [],
+    mapW: MAP_W,
+    mapH: MAP_H,
   };
+  genererMercenaires();
   journal(`⚑ L'an ${G.annee}. ${nations[nationJoueur].nom} entre dans l'Histoire.`);
   return G;
 }
@@ -371,6 +433,107 @@ function marcheVendre(nid, bien, quantite) {
   // L'offre fait baisser le prix
   G.marche[bien].prix = clamp(G.marche[bien].prix * (1 - 0.005 * quantite), PRIX_MIN, PRIX_MAX);
   return { ok: true, gain };
+}
+
+// ---------- Mercenaires ----------
+// Trois compagnies libres disponibles, renouvelées régulièrement.
+// L'effectif et le prix suivent l'avancée du monde (ère moyenne).
+function genererMercenaires() {
+  const ereMonde = Math.round(
+    G.nations.filter(n => n.vivante).reduce((s, n) => s + n.ere, 0) /
+    Math.max(1, G.nations.filter(n => n.vivante).length));
+  const noms = [...NOMS_MERCENAIRES];
+  G.mercenaires = [];
+  for (let i = 0; i < 3; i++) {
+    const inf = 3 + rand(6);
+    const choc = rand(4);
+    const siege = rand(3);
+    const cout = Math.round((inf * 12 + choc * 22 + siege * 26) * (1 + ereMonde * 0.3));
+    G.mercenaires.push({
+      nom: noms.splice(rand(noms.length), 1)[0],
+      inf, choc, siege, cout,
+    });
+  }
+}
+
+function embaucherMercenaires(nid, index) {
+  const n = nation(nid);
+  const cie = G.mercenaires[index];
+  if (!cie) return { ok: false };
+  if (n.or < cie.cout) return { ok: false, raison: 'Or insuffisant' };
+  const cap = provincesDe(nid).find(p => p.capitale) || provincesDe(nid)[0];
+  if (!cap) return { ok: false };
+  n.or -= cie.cout;
+  ajouterArmee(cap, { inf: cie.inf, choc: cie.choc, siege: cie.siege });
+  G.mercenaires.splice(index, 1);
+  journal(`🏴 ${n.nom} engage la ${cie.nom} (${cie.inf + cie.choc + cie.siege} soldats, déployés à ${cap.nom}).`);
+  return { ok: true, province: cap.id };
+}
+
+// ---------- Cités-états ----------
+function coutAnnexionCite(p) {
+  return 150 + p.troupes * 25;
+}
+
+// Annexion pacifique d'une cité-état adjacente au territoire
+function annexerCiteEtat(nid, pid) {
+  const p = G.provinces[pid];
+  const n = nation(nid);
+  if (!p.citeEtat || p.proprietaire !== -1) return { ok: false };
+  const adjacente = voisinsHex(p.col, p.row).some(i => G.provinces[i].proprietaire === nid);
+  if (!adjacente) return { ok: false, raison: 'Votre territoire doit border la cité' };
+  const cout = coutAnnexionCite(p);
+  if (n.or < cout) return { ok: false, raison: `${cout} 💰 requis` };
+  n.or -= cout;
+  p.proprietaire = nid;
+  journal(`🏛️ ${p.nom} rejoint ${n.nom} par la négociation (${cout} 💰).`);
+  return { ok: true };
+}
+
+// ---------- Négociations commerciales entre nations ----------
+// Acheter 20 unités d'un bien directement à une nation (10 % sous le marché)
+function acheterRessourceNation(a, b, bien) {
+  const QTE = 20;
+  const vendeur = nation(b);
+  if (enGuerre(a, b)) return { ok: false, raison: 'Impossible en temps de guerre' };
+  if (vendeur.marchandises[bien] < QTE + 20) {
+    return { ok: false, raison: `${vendeur.nom} n'a pas assez de ${MARCHANDISES[bien].nom.toLowerCase()} en surplus.` };
+  }
+  if (!vendeur.joueur && vendeur.relations[a] < -20) {
+    return { ok: false, raison: `${vendeur.nom} refuse de commercer avec vous (relations trop mauvaises).` };
+  }
+  const prix = Math.ceil(G.marche[bien].prix * 0.9 * QTE);
+  if (nation(a).or < prix) return { ok: false, raison: 'Or insuffisant' };
+  nation(a).or -= prix;
+  vendeur.or += prix;
+  nation(a).marchandises[bien] += QTE;
+  vendeur.marchandises[bien] -= QTE;
+  modifierRelation(a, b, 3);
+  journal(`🛒 ${nation(a).nom} achète ${QTE} ${MARCHANDISES[bien].icone} à ${vendeur.nom} pour ${prix} 💰.`);
+  return { ok: true };
+}
+
+// Exiger un tribut sous la menace : fonctionne si on est bien plus fort
+function exigerTribut(a, b) {
+  const cible = nation(b);
+  if (enGuerre(a, b)) return { ok: false, raison: 'Vous êtes déjà en guerre' };
+  const ratio = puissanceMilitaire(a) / Math.max(1, puissanceMilitaire(b));
+  if (ratio > 2 && (cible.joueur ? false : cible.stabilite < 75)) {
+    const tribut = Math.min(cible.or, 80 + rand(40));
+    cible.or -= tribut;
+    nation(a).or += tribut;
+    modifierRelation(a, b, -15);
+    journal(`🪙 ${cible.nom} cède un tribut de ${tribut} 💰 à ${nation(a).nom} sous la menace.`);
+    return { ok: true, tribut };
+  }
+  modifierRelation(a, b, -20);
+  // L'humiliation peut déclencher une guerre
+  if (!cible.joueur && Math.random() < 0.25) {
+    declarerGuerre(b, a);
+    return { ok: false, raison: `${cible.nom} répond à votre insolence par la guerre !` };
+  }
+  journal(`🪙 ${cible.nom} rejette avec mépris l'ultimatum de ${nation(a).nom}.`);
+  return { ok: false, raison: `${cible.nom} refuse de plier (soyez 2× plus puissant).` };
 }
 
 function organiserFetes(nid) {
@@ -766,6 +929,9 @@ function finDeTour() {
     m.prix = clamp(m.prix * randF(0.95, 1.05) + (MARCHANDISES[bien].prixBase - m.prix) * 0.05, PRIX_MIN, PRIX_MAX);
   }
 
+  // Rotation des compagnies de mercenaires
+  if (G.tour % TOURS_ROTATION_MERCENAIRES === 0 || G.mercenaires.length === 0) genererMercenaires();
+
   // 5. Réinitialiser les mouvements
   for (const p of G.provinces) p.aBouge = false;
 
@@ -792,7 +958,7 @@ function verifierVictoire() {
   for (const n of vivantes) {
     const part = provincesDe(n.id).length / terres;
     const vassaux = vivantes.filter(v => v.vassalDe === n.id).length;
-    if (part >= 0.7 || vivantes.every(v => v.id === n.id || v.vassalDe === n.id)) {
+    if (part >= 0.55 || vivantes.every(v => v.id === n.id || v.vassalDe === n.id)) {
       G.fini = true;
       return n.joueur
         ? { type: 'victoire', texte: `🏆 Victoire par DOMINATION ! Vous contrôlez le monde connu (${Math.round(part * 100)} % des terres, ${vassaux} vassaux).` }
@@ -839,8 +1005,12 @@ function charger() {
   } catch (e) { return false; }
 }
 
-// Compatibilité avec les sauvegardes d'avant le système économique
+// Compatibilité avec les sauvegardes des versions précédentes
 function migrerSauvegarde() {
+  // Dimensions de la carte (les anciennes parties étaient en 16×12)
+  MAP_W = G.mapW || 16;
+  MAP_H = G.mapH || 12;
+  if (!G.mapW) { G.mapW = MAP_W; G.mapH = MAP_H; }
   if (!G.marche) {
     G.marche = Object.fromEntries(Object.entries(MARCHANDISES).map(([k, m]) => [k, { prix: m.prixBase }]));
   }
@@ -851,7 +1021,9 @@ function migrerSauvegarde() {
   for (const p of G.provinces) {
     if (!p.armee) p.armee = { inf: p.troupes || 0, choc: 0, siege: 0 };
     if (p.batiments.exploitation === undefined) p.batiments.exploitation = 0;
+    if (p.citeEtat === undefined) p.citeEtat = false;
   }
+  if (!G.mercenaires) { G.mercenaires = []; genererMercenaires(); }
 }
 
 function sauvegardeExiste() {
