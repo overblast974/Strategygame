@@ -301,6 +301,11 @@ const FOCUS_PROVINCE = {
 // ---- Marine de guerre ----
 const COUT_NAVIRE = { or: 40, bois: 15 };
 
+// ---- Dynasties ----
+const PRENOMS_GENERIQUES = ['Aldric', 'Corin', 'Doran', 'Elric', 'Kael', 'Theron', 'Vance', 'Orin', 'Maël', 'Sorin', 'Bran', 'Cédric'];
+const AGE_MAJORITE = 16;
+const MAX_HERITIERS = 3;
+
 // Syllabes pour générer les noms de provinces
 const SYLLABES_A = ['Bel', 'Cor', 'Dun', 'Fal', 'Gar', 'Hol', 'Kel', 'Lor', 'Mar', 'Nor', 'Or', 'Pel', 'Ras', 'Sil', 'Tor', 'Val', 'Wes', 'Yr', 'Zan', 'Ald'];
 const SYLLABES_B = ['a', 'e', 'i', 'o', 'u', 'ae', 'ia', 'ou'];

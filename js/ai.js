@@ -112,6 +112,11 @@ function iaDiplomatie(nid, perso) {
       proposerAccordCommercial(nid, autre.id);
     }
 
+    // Mariage royal pour sceller une amitié
+    if (!n.mariages.includes(autre.id) && rel > 30 && Math.random() < perso.diplomatie * 0.15) {
+      mariageRoyal(nid, autre.id);
+    }
+
     // Déclarer la guerre à une cible faible et détestée
     if (!enGuerre(nid, autre.id) && !aPacte(nid, autre.id) && !allies(nid, autre.id) &&
         autre.vassalDe !== nid && n.vassalDe === -1) {

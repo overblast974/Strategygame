@@ -173,6 +173,106 @@ function choisirDoctrine(nid, doctrine) {
   return { ok: true };
 }
 
+// ---------- Dynasties ----------
+function chiffreRomain(n) {
+  const t = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
+  return t[Math.min(n, 12)] || String(n);
+}
+
+function prenomsDynastie(nid) {
+  const n = nation(nid);
+  return (typeof PRENOMS_TERRE !== 'undefined' && PRENOMS_TERRE[n.nom]) || PRENOMS_GENERIQUES;
+}
+
+// Crée un personnage : nom numéroté (Hugues II…), âge, trois compétences
+function creerPersonnage(nid, age) {
+  const n = nation(nid);
+  if (!n.numerotation) n.numerotation = {};
+  const prenom = pick(prenomsDynastie(nid));
+  n.numerotation[prenom] = (n.numerotation[prenom] || 0) + 1;
+  const numero = n.numerotation[prenom];
+  return {
+    nom: numero > 1 ? `${prenom} ${chiffreRomain(numero)}` : prenom,
+    age,
+    martial: 1 + rand(9),
+    diplomatie: 1 + rand(9),
+    intendance: 1 + rand(9),
+  };
+}
+
+function initDynastie(nid) {
+  const n = nation(nid);
+  n.dirigeant = creerPersonnage(nid, 25 + rand(25));
+  n.heritiers = Math.random() < 0.6 ? [creerPersonnage(nid, rand(15))] : [];
+  n.mariages = [];
+}
+
+// Vieillissement, naissances et morts — appelé chaque tour pour chaque nation
+function vivreDynastie(nid, annees) {
+  const n = nation(nid);
+  if (!n.dirigeant) return;
+  n.dirigeant.age += annees;
+  for (const h of n.heritiers) h.age += annees;
+
+  // Naissance d'un héritier
+  if (n.dirigeant.age >= 18 && n.dirigeant.age <= 52 && n.heritiers.length < MAX_HERITIERS &&
+      Math.random() < 0.12 * (annees / 10 + 0.4)) {
+    const h = creerPersonnage(nid, 0);
+    n.heritiers.push(h);
+    if (n.joueur) journal(`👶 Naissance à la cour : ${h.nom} rejoint la lignée.`);
+  }
+
+  // Mort du souverain (l'âge ne pardonne pas)
+  const risque = Math.max(0.004, (n.dirigeant.age - 48) * 0.011) * (annees / 10 + 0.4);
+  if (Math.random() < risque) {
+    const defunt = n.dirigeant;
+    const majeurs = n.heritiers.filter(h => h.age >= AGE_MAJORITE);
+    if (majeurs.length > 0) {
+      n.dirigeant = majeurs[0];
+      n.heritiers = n.heritiers.filter(h => h !== majeurs[0]);
+      journal(`⚰️ ${defunt.nom} de ${n.nom} s'éteint à ${defunt.age} ans. ${n.dirigeant.nom} monte sur le trône.`);
+      if (n.joueur) {
+        G.message = {
+          titre: `⚰️ Mort de ${defunt.nom}`,
+          texte: `Votre souverain s'éteint à ${defunt.age} ans. ${n.dirigeant.nom} (${n.dirigeant.age} ans) est couronné — ` +
+            `🗡️ ${n.dirigeant.martial} · 🕊️ ${n.dirigeant.diplomatie} · 💰 ${n.dirigeant.intendance}. Longue vie au nouveau règne !`,
+        };
+      }
+    } else {
+      // Pas d'héritier majeur : crise de succession, un régent prend le pouvoir
+      n.dirigeant = creerPersonnage(nid, 30 + rand(20));
+      n.stabilite = clamp(n.stabilite - 15, 0, 100);
+      journal(`⚰️ ${defunt.nom} de ${n.nom} meurt sans héritier majeur ! ${n.dirigeant.nom} s'impose dans la crise.`);
+      if (n.joueur) {
+        G.message = {
+          titre: '⚠️ Crise de succession !',
+          texte: `${defunt.nom} meurt sans héritier en âge de régner. ${n.dirigeant.nom} s'empare du pouvoir dans la confusion (−15 stabilité).`,
+        };
+      }
+    }
+  }
+}
+
+// Mariage royal entre deux dynasties : grande amitié durable
+function mariageRoyal(a, b) {
+  const na = nation(a), nb = nation(b);
+  if (na.mariages.includes(b)) return { ok: false, raison: 'Vos dynasties sont déjà unies' };
+  if (enGuerre(a, b)) return { ok: false, raison: 'Impossible en temps de guerre' };
+  if (!nationsEnContact(a, b)) return { ok: false, raison: RAISON_CONTACT };
+  const aUnHeritier = na.heritiers.some(h => h.age >= AGE_MAJORITE) || nb.heritiers.some(h => h.age >= AGE_MAJORITE);
+  if (!aUnHeritier) return { ok: false, raison: 'Aucun héritier en âge de se marier (16 ans) dans les deux cours' };
+  if (!nb.joueur && nb.relations[a] < 0) {
+    return { ok: false, raison: `${nb.nom} refuse d'unir sa lignée à la vôtre (relations trop froides).` };
+  }
+  na.mariages.push(b);
+  nb.mariages.push(a);
+  modifierRelation(a, b, 30);
+  na.stabilite = clamp(na.stabilite + 5, 0, 100);
+  nb.stabilite = clamp(nb.stabilite + 5, 0, 100);
+  journal(`💍 Mariage royal ! Les dynasties de ${na.nom} et ${nb.nom} sont unies.`);
+  return { ok: true };
+}
+
 // ---------- Marine de guerre ----------
 function construireNavires(nid, quantite) {
   const n = nation(nid);
@@ -514,6 +614,7 @@ function nouvellePartie(nationJoueur, mode = 'terre') {
     mode,
   };
   genererMercenaires();
+  for (const n of nations) initDynastie(n.id);
   journal(`⚑ L'an ${G.annee}. ${nations[nationJoueur].nom} entre dans l'Histoire.`);
   return G;
 }
@@ -608,6 +709,8 @@ function revenus(nid) {
   if (n.doctrine === 'mercantiliste') or_ *= 1.2;
   if (n.doctrine === 'agraire') nour *= 1.25;
   if (n.doctrine === 'rationaliste') sci *= 1.25;
+  // Un bon intendant sur le trône enrichit le royaume
+  if (n.dirigeant) or_ *= 1 + n.dirigeant.intendance * 0.015;
   // Impôts : la population paie
   or_ += popTotale * 0.15;
   // Entretien des troupes et de la flotte
@@ -887,6 +990,7 @@ function resoudreAttaque(source, cible, multAtt = 1) {
   const s = G.provinces[source], c = G.provinces[cible];
   const att = nation(s.proprietaire);
   if (att.doctrine === 'militariste') multAtt *= 1.1;
+  if (att.dirigeant) multAtt *= 1 + att.dirigeant.martial * 0.015; // génie militaire du souverain
   const engages = extraireArmee(s, s.troupes - 1); // une garnison reste
   const nbEngages = totalArmee(engages);
   const ereDef = c.proprietaire >= 0 ? nation(c.proprietaire).ere : 0;
@@ -1071,7 +1175,10 @@ function proposerAlliance(a, b) {
   if (!cible.joueur) {
     const rel = cible.relations[a];
     const perso = PERSONNALITES[cible.perso];
-    const seuil = 55 - perso.diplomatie * 25;
+    // Un souverain diplomate convainc plus facilement ; un mariage royal aussi
+    const bonusDiplo = (nation(a).dirigeant ? nation(a).dirigeant.diplomatie * 1.5 : 0) +
+      (nation(a).mariages && nation(a).mariages.includes(b) ? 15 : 0);
+    const seuil = Math.round(55 - perso.diplomatie * 25 - bonusDiplo);
     if (rel < seuil) return { ok: false, raison: `${cible.nom} ne vous fait pas assez confiance (relations ${rel}, ${seuil} requis).` };
   }
   nation(a).alliances.push(b);
@@ -1317,6 +1424,12 @@ function finDeTour() {
   // Rotation des compagnies de mercenaires
   if (G.tour % TOURS_ROTATION_MERCENAIRES === 0 || G.mercenaires.length === 0) genererMercenaires();
 
+  // Les dynasties vivent : vieillesse, naissances, successions
+  const anneesTour = ERES[nation(G.joueur).ere].anneesParTour;
+  for (const n of G.nations) {
+    if (n.vivante) vivreDynastie(n.id, anneesTour);
+  }
+
   // 5. Réinitialiser les mouvements
   for (const p of G.provinces) p.aBouge = false;
 
@@ -1438,6 +1551,8 @@ function migrerSauvegarde() {
   for (const n of G.nations) {
     if (n.flotte === undefined) n.flotte = 0;
     if (n.doctrine === undefined) { n.doctrine = null; n.doctrineTour = -99; }
+    if (!n.dirigeant) initDynastie(n.id);
+    if (!n.mariages) n.mariages = [];
   }
   for (const p of G.provinces) {
     if (p.focus === undefined) p.focus = 'equilibre';

@@ -884,6 +884,7 @@ function ouvrirDiplomatieAvec(nid) {
     else boutons += `<button class="btn btn-danger" onclick="uiDiplo('rompre',${nid})">💔 Rompre l'alliance</button>`;
     if (!pacte && !allie) boutons += `<button class="btn" onclick="uiDiplo('pacte',${nid})">📜 Pacte de non-agression</button>`;
     if (!aAccord(G.joueur, nid)) boutons += `<button class="btn" onclick="uiDiplo('accord',${nid})">💱 Accord commercial (+8 💰/tour chacun)</button>`;
+    if (!nation(G.joueur).mariages.includes(nid)) boutons += `<button class="btn" onclick="uiDiplo('mariage',${nid})">💍 Mariage royal (+30 relations, +5 🏛️)</button>`;
     boutons += `<button class="btn" onclick="ouvrirAchatRessources(${nid})">🛒 Acheter des ressources (−10 % du marché)</button>`;
     boutons += `<button class="btn" onclick="uiDiplo('cadeau',${nid},50)">🎁 Cadeau (50 💰)</button>`;
     boutons += `<button class="btn btn-danger" onclick="uiDiplo('tribut',${nid})">🪙 Exiger un tribut (menace)</button>`;
@@ -895,6 +896,7 @@ function ouvrirDiplomatieAvec(nid) {
   const contact = nationsEnContact(G.joueur, nid);
   ouvrirModale(`<h2><span class="pastille" style="background:${n.couleur}"></span> ${n.nom}</h2>
     <p>${PERSONNALITES[n.perso].nom} · ${ERES[n.ere].nom} · ${provincesDe(nid).length} provinces · ⚔️ ${Math.round(puissanceMilitaire(nid))} · ⛵ ${n.flotte} · Relations : <b>${rel > 0 ? '+' : ''}${rel}</b></p>
+    <p><small>👑 ${n.dirigeant.nom}, ${n.dirigeant.age} ans${nation(G.joueur).mariages.includes(nid) ? ' · 💍 nos dynasties sont unies' : ''}</small></p>
     ${contact ? '' : `<p><small>🚫 Nations sans contact : il faut une frontière commune, ou un port de chaque côté, pour traiter ensemble.</small></p>`}
     <div class="colonne-btn">${boutons}</div>
     <div class="rangee-btn"><button class="btn" onclick="ouvrirDiplomatie()">← Retour</button></div>`);
@@ -908,6 +910,9 @@ function uiDiplo(action, nid, montant = 0) {
     case 'rompre': romprAlliance(G.joueur, nid); r = { ok: true }; break;
     case 'pacte': r = proposerPacte(G.joueur, nid); break;
     case 'accord': r = proposerAccordCommercial(G.joueur, nid); break;
+    case 'mariage': r = mariageRoyal(G.joueur, nid);
+      if (r.ok) toast('💍 Vos dynasties sont unies !');
+      break;
     case 'tribut': r = exigerTribut(G.joueur, nid);
       if (r.ok) toast(`🪙 Tribut de ${r.tribut} 💰 obtenu !`);
       break;
@@ -1181,6 +1186,9 @@ function ouvrirMenu() {
     </div>`;
   }
   ouvrirModale(`<h2>⚙️ Menu</h2>
+    <div class="colonne-btn" style="margin-bottom:10px">
+      <button class="btn btn-principal" onclick="ouvrirDynastie()">👑 Ma dynastie</button>
+    </div>
     <p><small>La partie en cours est aussi sauvegardée automatiquement à chaque fin de tour.</small></p>
     ${slots}
     <div class="colonne-btn" style="margin-top:14px">
@@ -1208,6 +1216,37 @@ function uiChargerSlot(s) {
 function uiRetourTitre() {
   fermerModale();
   afficherEcranTitre();
+}
+
+// ---------- Dynastie ----------
+function cartePersonnage(perso, role) {
+  return `<div class="ligne-bien">
+    <div class="lb-info">
+      <b>${role} ${perso.nom}</b>
+      <small>${perso.age} ans · 🗡️ ${perso.martial} martial · 🕊️ ${perso.diplomatie} diplomatie · 💰 ${perso.intendance} intendance</small>
+    </div>
+  </div>`;
+}
+
+function ouvrirDynastie() {
+  const moi = nation(G.joueur);
+  let html = `<h2>👑 Dynastie de ${moi.nom}</h2>`;
+  html += cartePersonnage(moi.dirigeant, '👑');
+  html += `<p><small>🗡️ martial : +${(moi.dirigeant.martial * 1.5).toFixed(1)} % de force en attaque ·
+    💰 intendance : +${(moi.dirigeant.intendance * 1.5).toFixed(1)} % d'or ·
+    🕊️ diplomatie : alliances plus faciles</small></p>
+    <h3 class="titre-section">Héritiers</h3>`;
+  if (moi.heritiers.length === 0) {
+    html += `<p><small>Aucun héritier… Si le souverain meurt, une crise de succession éclatera (−15 stabilité).</small></p>`;
+  }
+  for (const h of moi.heritiers) {
+    html += cartePersonnage(h, h.age >= AGE_MAJORITE ? '🤴' : '👶');
+  }
+  const unions = moi.mariages.filter(m => nation(m).vivante).map(m => nation(m).nom);
+  html += `<h3 class="titre-section">💍 Unions royales</h3>
+    <p><small>${unions.length ? unions.join(' · ') : 'Aucune — proposez un mariage royal via la Diplomatie (héritier de 16 ans requis).'}</small></p>
+    <div class="rangee-btn"><button class="btn" onclick="fermerModale()">Fermer</button></div>`;
+  ouvrirModale(html);
 }
 
 function majTout() {
