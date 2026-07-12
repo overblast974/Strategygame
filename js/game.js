@@ -98,6 +98,7 @@ function genererCarte() {
         batiments: batimentsVides(),
         gisements: [],
         pop: 0,
+        focus: 'equilibre',
         capitale: false,
         citeEtat: false,
       });
@@ -142,6 +143,57 @@ function capaciteProvince(p) {
 // Rendement du travail : une province dépeuplée produit moins
 function facteurTravail(p) {
   return clamp(p.pop / 8, 0.25, 1);
+}
+
+// Multiplicateur de spécialisation : +50 % sur la voie choisie, −25 % ailleurs
+const FOCUS_CATEGORIES = { agricole: 'nourriture', minier: 'marchandise', lettre: 'science', commercant: 'or' };
+function focusMult(p, categorie) {
+  if (!p.focus || p.focus === 'equilibre') return 1;
+  return FOCUS_CATEGORIES[p.focus] === categorie ? 1.5 : 0.75;
+}
+
+function definirFocus(pid, focus) {
+  const p = G.provinces[pid];
+  if (!FOCUS_PROVINCE[focus]) return { ok: false };
+  p.focus = focus;
+  return { ok: true };
+}
+
+// ---------- Doctrines nationales ----------
+function choisirDoctrine(nid, doctrine) {
+  const n = nation(nid);
+  if (!DOCTRINES[doctrine]) return { ok: false };
+  if (n.doctrine === doctrine) return { ok: false };
+  if (G.tour - n.doctrineTour < DELAI_DOCTRINE) {
+    return { ok: false, raison: `Changement possible dans ${DELAI_DOCTRINE - (G.tour - n.doctrineTour)} tours` };
+  }
+  n.doctrine = doctrine;
+  n.doctrineTour = G.tour;
+  journal(`${DOCTRINES[doctrine].icone} ${n.nom} adopte la doctrine ${DOCTRINES[doctrine].nom.toLowerCase()}.`);
+  return { ok: true };
+}
+
+// ---------- Marine de guerre ----------
+function construireNavires(nid, quantite) {
+  const n = nation(nid);
+  if (nbPorts(nid) < 1) return { ok: false, raison: 'Un port est requis' };
+  const or_ = COUT_NAVIRE.or * quantite, bois = COUT_NAVIRE.bois * quantite;
+  if (n.or < or_) return { ok: false, raison: 'Or insuffisant' };
+  if (n.marchandises.bois < bois) return { ok: false, raison: `Bois insuffisant (${bois} 🪵)` };
+  n.or -= or_;
+  n.marchandises.bois -= bois;
+  n.flotte += quantite;
+  return { ok: true };
+}
+
+// La nation nid subit-elle un blocus ? (ennemi en guerre avec flotte très supérieure)
+function subitBlocus(nid) {
+  const n = nation(nid);
+  for (const eid of n.guerres) {
+    const e = nation(eid);
+    if (e.vivante && e.flotte > n.flotte * 1.5 && e.flotte >= 3) return eid;
+  }
+  return -1;
 }
 
 function emplacementsUtilises(p) {
@@ -255,11 +307,168 @@ function placerNations(provinces, nations) {
   }
 }
 
+// ---------- Génération du monde historique (Terre, an 1000) ----------
+function genererCarteTerre() {
+  const provinces = [];
+  for (let r = 0; r < TERRE_H; r++) {
+    const ligne = (CARTE_TERRE[r] || '').padEnd(TERRE_W, '.');
+    for (let c = 0; c < TERRE_W; c++) {
+      const id = r * MAP_W + c;
+      const terrain = CODE_TERRAIN[ligne[c]] || 'eau';
+      provinces.push({
+        id, col: c, row: r, terrain,
+        nom: '',
+        proprietaire: -1,
+        troupes: 0,
+        armee: armeeVide(),
+        aBouge: false,
+        batiments: batimentsVides(),
+        gisements: [],
+        pop: 0,
+        focus: 'equilibre',
+        capitale: false,
+        citeEtat: false,
+      });
+    }
+  }
+  for (const p of provinces) {
+    if (p.terrain === 'eau') continue;
+    for (const [bien, prob] of (GISEMENTS_PAR_TERRAIN[p.terrain] || [])) {
+      if (Math.random() < prob) p.gisements.push(bien);
+    }
+    p.pop = (p.terrain === 'plaine' ? 6 : p.terrain === 'toundra' || p.terrain === 'desert' ? 3 : 4) + rand(4);
+  }
+  return provinces;
+}
+
+// Terre libre la plus proche d'une coordonnée cible
+function terreProche(provinces, col, ligne) {
+  let best = null, bestD = Infinity;
+  for (const p of provinces) {
+    if (p.terrain === 'eau' || p.proprietaire !== -1 || p.citeEtat) continue;
+    const d = Math.hypot(p.col - col, p.row - ligne);
+    if (d < bestD) { bestD = d; best = p; }
+  }
+  return best;
+}
+
+function placerNationsTerre(provinces, nations) {
+  // Capitales historiques
+  const capitales = [];
+  for (let n = 0; n < nations.length; n++) {
+    const def = NATIONS_TERRE[n];
+    const cap = terreProche(provinces, def.capitale[0], def.capitale[1]);
+    cap.proprietaire = n;
+    cap.capitale = true;
+    cap.nom = def.nomCapitale;
+    cap.armee = { inf: 8, choc: 2, siege: 0 };
+    majTroupes(cap);
+    cap.batiments.fort = 1;
+    cap.pop = 12;
+    capitales.push(cap);
+  }
+  // Premier anneau garanti + expansion
+  for (let n = 0; n < nations.length; n++) {
+    for (const vid of voisinsHex(capitales[n].col, capitales[n].row)) {
+      const v = provinces[vid];
+      if (v.terrain !== 'eau' && v.proprietaire === -1) {
+        v.proprietaire = n;
+        v.armee = { inf: 2 + rand(3), choc: 0, siege: 0 };
+        majTroupes(v);
+      }
+    }
+  }
+  for (let vague = 0; vague < 2; vague++) {
+    for (let n = 0; n < nations.length; n++) {
+      for (const p of provinces.filter(x => x.proprietaire === n)) {
+        for (const vid of voisinsHex(p.col, p.row)) {
+          const v = provinces[vid];
+          if (v.terrain !== 'eau' && v.proprietaire === -1 && Math.random() < 0.4) {
+            v.proprietaire = n;
+            v.armee = { inf: 2 + rand(3), choc: 0, siege: 0 };
+            majTroupes(v);
+          }
+        }
+      }
+    }
+  }
+  // Minimum territorial : chaque puissance revendique au moins 8 provinces
+  for (let n = 0; n < nations.length; n++) {
+    let miennes = provinces.filter(p => p.proprietaire === n);
+    let garde = 0;
+    while (miennes.length < 8 && garde++ < 25) {
+      let best = null, bestD = Infinity;
+      for (const libre of provinces) {
+        if (libre.terrain === 'eau' || libre.proprietaire !== -1 || libre.citeEtat) continue;
+        for (const m of miennes) {
+          const d = Math.hypot(libre.col - m.col, libre.row - m.row);
+          if (d < bestD) { bestD = d; best = libre; }
+        }
+      }
+      if (!best) break;
+      best.proprietaire = n;
+      best.armee = { inf: 2 + rand(3), choc: 0, siege: 0 };
+      majTroupes(best);
+      miennes = provinces.filter(p => p.proprietaire === n);
+    }
+  }
+  // Noms historiques des provinces de chaque nation (des plus proches aux plus lointaines)
+  for (let n = 0; n < nations.length; n++) {
+    const noms = [...NATIONS_TERRE[n].provinces];
+    const miennes = provinces.filter(p => p.proprietaire === n && !p.capitale)
+      .sort((a, b) => Math.hypot(a.col - capitales[n].col, a.row - capitales[n].row) -
+                      Math.hypot(b.col - capitales[n].col, b.row - capitales[n].row));
+    for (const p of miennes) {
+      if (noms.length) p.nom = noms.shift();
+    }
+  }
+  // Cités-états historiques
+  for (const [nom, c, l] of CITES_TERRE) {
+    const p = terreProche(provinces, c, l);
+    if (!p) continue;
+    p.proprietaire = -1;
+    p.citeEtat = true;
+    p.nom = nom;
+    p.armee = { inf: 7 + rand(5), choc: 2, siege: 0 };
+    majTroupes(p);
+    p.batiments.fort = 1;
+    p.batiments.marche = 1;
+    p.pop = 12;
+  }
+  // Terres libres : garnisons + noms régionaux historiques
+  const zones = ZONES_NOMS_TERRE.map(z => ({ zone: z.zone, noms: [...z.noms] }));
+  const nomRegional = (col, ligne) => {
+    for (const z of zones) {
+      const [c1, c2, l1, l2] = z.zone;
+      if (col >= c1 && col <= c2 && ligne >= l1 && ligne <= l2 && z.noms.length) {
+        return z.noms.splice(rand(z.noms.length), 1)[0];
+      }
+    }
+    return nomProvince();
+  };
+  for (const p of provinces) {
+    if (p.terrain === 'eau') continue;
+    if (p.proprietaire === -1 && !p.citeEtat && p.troupes === 0) {
+      p.armee = { inf: 3 + rand(4), choc: 0, siege: 0 };
+      majTroupes(p);
+    }
+    if (!p.nom) p.nom = nomRegional(p.col, p.row);
+  }
+}
+
 // ---------- Nouvelle partie ----------
-function nouvellePartie(nationJoueur) {
-  MAP_W = 22; // dimensions du monde actuel (les sauvegardes anciennes peuvent différer)
-  MAP_H = 26;
-  const nations = NATIONS_DEFS.map((def, i) => ({
+function nouvellePartie(nationJoueur, mode = 'terre') {
+  let defs;
+  if (mode === 'terre') {
+    MAP_W = TERRE_W;
+    MAP_H = TERRE_H;
+    defs = NATIONS_TERRE;
+  } else {
+    MAP_W = 22; // dimensions du monde procédural
+    MAP_H = 26;
+    defs = NATIONS_DEFS;
+  }
+  const nations = defs.map((def, i) => ({
     id: i,
     nom: def.nom,
     couleur: def.couleur,
@@ -274,16 +483,20 @@ function nouvellePartie(nationJoueur) {
     ascension: 0,           // progression du projet final
     ascensionActive: false,
     vassalDe: -1,
-    relations: NATIONS_DEFS.map((_, j) => (i === j ? 100 : rand(21) - 10)),
+    relations: defs.map((_, j) => (i === j ? 100 : rand(21) - 10)),
     alliances: [],
     pactes: [],
     guerres: [],
     accords: [],            // accords commerciaux
     marchandises: { bois: 30, fer: 20, pierre: 20, epices: 10 },
+    flotte: 0,
+    doctrine: null,
+    doctrineTour: -99,
   }));
 
-  const provinces = genererCarte();
-  placerNations(provinces, nations);
+  const provinces = mode === 'terre' ? genererCarteTerre() : genererCarte();
+  if (mode === 'terre') placerNationsTerre(provinces, nations);
+  else placerNations(provinces, nations);
 
   G = {
     tour: 1,
@@ -298,6 +511,7 @@ function nouvellePartie(nationJoueur) {
     mercenaires: [],
     mapW: MAP_W,
     mapH: MAP_H,
+    mode,
   };
   genererMercenaires();
   journal(`⚑ L'an ${G.annee}. ${nations[nationJoueur].nom} entre dans l'Histoire.`);
@@ -377,23 +591,28 @@ function nbPorts(nid) {
 
 function revenus(nid) {
   const n = nation(nid);
+  const bloque = subitBlocus(nid) >= 0;
   let or_ = 0, nour = 0, sci = 0, popTotale = 0;
   for (const p of provincesDe(nid)) {
     const t = TERRAINS[p.terrain];
     const f = facteurTravail(p);
-    or_ += t.or * f + p.batiments.marche * BATIMENTS.marche.bonus + p.batiments.port * BATIMENTS.port.bonus;
-    // Les mines d'or produisent de l'or directement (gisement requis à la construction)
-    or_ += p.batiments.mine_or * BATIMENTS.mine_or.bonus * f;
-    nour += t.nourriture * f + p.batiments.ferme * BATIMENTS.ferme.bonus;
-    sci += t.science * f + p.batiments.ecole * BATIMENTS.ecole.bonus;
+    const portBonus = p.batiments.port * BATIMENTS.port.bonus * (bloque ? 0.5 : 1);
+    or_ += (t.or * f + p.batiments.marche * BATIMENTS.marche.bonus + portBonus +
+            p.batiments.mine_or * BATIMENTS.mine_or.bonus * f) * focusMult(p, 'or');
+    nour += (t.nourriture * f + p.batiments.ferme * BATIMENTS.ferme.bonus) * focusMult(p, 'nourriture');
+    sci += (t.science * f + p.batiments.ecole * BATIMENTS.ecole.bonus) * focusMult(p, 'science');
     popTotale += p.pop;
     if (p.capitale) { or_ += 4; sci += 3; }
   }
+  // Doctrines nationales
+  if (n.doctrine === 'mercantiliste') or_ *= 1.2;
+  if (n.doctrine === 'agraire') nour *= 1.25;
+  if (n.doctrine === 'rationaliste') sci *= 1.25;
   // Impôts : la population paie
   or_ += popTotale * 0.15;
-  // Entretien des troupes
+  // Entretien des troupes et de la flotte
   const troupes = provincesDe(nid).reduce((s, p) => s + p.troupes, 0);
-  const entretien = Math.floor(troupes / 2);
+  const entretien = Math.floor(troupes / 2) + Math.floor(n.flotte / 2);
   // Tribut des vassaux
   let tribut = 0;
   for (const autre of G.nations) {
@@ -412,7 +631,7 @@ function revenus(nid) {
   for (const pid of n.accords) {
     if (!nation(pid).vivante) continue;
     commerce += 8;
-    if (mesPorts > 0 && nbPorts(pid) > 0) { commerce += 5; routesMaritimes++; }
+    if (mesPorts > 0 && nbPorts(pid) > 0 && !bloque) { commerce += 5; routesMaritimes++; }
   }
   const mult = n.stabilite >= 50 ? 1 : 0.7; // instabilité = pertes
   return {
@@ -480,12 +699,13 @@ function recruter(pid, type, quantite) {
   const p = G.provinces[pid];
   const n = nation(p.proprietaire);
   const c = TYPES_UNITES[type].cout;
+  const coutOr = Math.round(c.or * quantite * (n.doctrine === 'militariste' ? 0.8 : 1));
   if (p.pop <= quantite) return { ok: false, raison: `Population insuffisante (${quantite} 👥 requis, il faut en garder)` };
-  if (n.or < c.or * quantite) return { ok: false, raison: 'Or insuffisant' };
+  if (n.or < coutOr) return { ok: false, raison: 'Or insuffisant' };
   if (n.nourriture < c.nourriture * quantite) return { ok: false, raison: 'Nourriture insuffisante' };
   if (n.marchandises.fer < c.fer * quantite) return { ok: false, raison: `Fer insuffisant (${c.fer * quantite} ⚒️ requis)` };
   if (n.marchandises.pierre < c.pierre * quantite) return { ok: false, raison: `Pierre insuffisante (${c.pierre * quantite} 🪨 requise)` };
-  n.or -= c.or * quantite;
+  n.or -= coutOr;
   n.nourriture -= c.nourriture * quantite;
   n.marchandises.fer -= c.fer * quantite;
   n.marchandises.pierre -= c.pierre * quantite;
@@ -504,7 +724,7 @@ function productionMarchandises(nid) {
     for (const bien of p.gisements) {
       if (bien === 'or') continue; // l'or est géré dans revenus()
       const bat = BATIMENT_POUR_GISEMENT[bien];
-      prod[bien] += Math.round((1 + p.batiments[bat] * BATIMENTS[bat].bonus) * f);
+      prod[bien] += Math.round((1 + p.batiments[bat] * BATIMENTS[bat].bonus) * f * focusMult(p, 'marchandise'));
     }
   }
   return prod;
@@ -527,7 +747,7 @@ function marcheAcheter(nid, bien, quantite) {
 function marcheVendre(nid, bien, quantite) {
   const n = nation(nid);
   if (n.marchandises[bien] < quantite) return { ok: false, raison: 'Stock insuffisant' };
-  const gain = prixVente(bien) * quantite;
+  const gain = Math.round(prixVente(bien) * quantite * (n.doctrine === 'mercantiliste' ? 1.1 : 1));
   n.marchandises[bien] -= quantite;
   n.or += gain;
   // L'offre fait baisser le prix
@@ -596,6 +816,7 @@ function acheterRessourceNation(a, b, bien) {
   const QTE = 20;
   const vendeur = nation(b);
   if (enGuerre(a, b)) return { ok: false, raison: 'Impossible en temps de guerre' };
+  if (!nationsEnContact(a, b)) return { ok: false, raison: RAISON_CONTACT };
   if (vendeur.marchandises[bien] < QTE + 20) {
     return { ok: false, raison: `${vendeur.nom} n'a pas assez de ${MARCHANDISES[bien].nom.toLowerCase()} en surplus.` };
   }
@@ -662,9 +883,10 @@ function peutAttaquer(source, cible) {
   return true;
 }
 
-function resoudreAttaque(source, cible) {
+function resoudreAttaque(source, cible, multAtt = 1) {
   const s = G.provinces[source], c = G.provinces[cible];
   const att = nation(s.proprietaire);
+  if (att.doctrine === 'militariste') multAtt *= 1.1;
   const engages = extraireArmee(s, s.troupes - 1); // une garnison reste
   const nbEngages = totalArmee(engages);
   const ereDef = c.proprietaire >= 0 ? nation(c.proprietaire).ere : 0;
@@ -672,7 +894,7 @@ function resoudreAttaque(source, cible) {
   const reducSiege = Math.max(0.35, 1 - engages.siege * 0.12);
   const bonusFort = 1 + c.batiments.fort * BATIMENTS.fort.bonus * reducSiege;
   const bonusTerrain = TERRAINS[c.terrain].defense;
-  const forceAtt = forceAttaque(engages, att.ere) * randF(0.85, 1.2);
+  const forceAtt = forceAttaque(engages, att.ere) * multAtt * randF(0.85, 1.2);
   const forceDef = Math.max(1, forceDefense(c.armee, ereDef)) * bonusFort * bonusTerrain * randF(0.85, 1.2);
 
   s.aBouge = true;
@@ -717,6 +939,26 @@ function resoudreAttaque(source, cible) {
   }
 }
 
+// Invasion amphibie : depuis un port, attaquer toute côte ennemie (flotte requise)
+function peutAttaquerAmphibie(source, cible) {
+  const s = G.provinces[source], c = G.provinces[cible];
+  if (s.proprietaire === c.proprietaire || c.terrain === 'eau') return false;
+  if (s.batiments.port < 1 || !estCotiere(c)) return false;
+  if (s.aBouge || s.troupes < 2) return false;
+  if (nation(s.proprietaire).flotte < s.troupes - 1) return false;
+  if (c.proprietaire >= 0) {
+    if (!enGuerre(s.proprietaire, c.proprietaire)) return false;
+    if (estVassal(c.proprietaire, s.proprietaire) || estVassal(s.proprietaire, c.proprietaire)) return false;
+  }
+  return true;
+}
+
+function attaqueAmphibie(source, cible) {
+  if (!peutAttaquerAmphibie(source, cible)) return { ok: false, raison: 'Invasion impossible' };
+  journal(`🌊 Débarquement de ${nation(G.provinces[source].proprietaire).nom} sur ${G.provinces[cible].nom} !`);
+  return resoudreAttaque(source, cible, 0.85); // débarquer sous le feu coûte cher
+}
+
 function deplacerTroupes(source, cible, quantite) {
   const s = G.provinces[source], c = G.provinces[cible];
   if (s.proprietaire !== c.proprietaire) return { ok: false };
@@ -752,8 +994,23 @@ function modifierRelation(a, b, delta) {
   nation(b).relations[a] = clamp(nation(b).relations[a] + delta, -100, 100);
 }
 
+// Deux nations sont-elles en contact ? (frontière commune, ou mer ouverte des deux côtés)
+function nationsEnContact(a, b) {
+  if (nbPorts(a) > 0 && nbPorts(b) > 0) return true;
+  for (const p of provincesDe(a)) {
+    for (const vid of voisinsHex(p.col, p.row)) {
+      if (G.provinces[vid].proprietaire === b) return true;
+    }
+  }
+  return false;
+}
+const RAISON_CONTACT = 'Vos nations ne sont pas en contact : frontière commune ou un port de chaque côté requis.';
+
 function declarerGuerre(a, b) {
   if (enGuerre(a, b)) return { ok: false };
+  // Guerre possible si contact, ou si l'attaquant a une flotte face à une nation côtière
+  const porteeNavale = nbPorts(a) > 0 && nation(a).flotte > 0 && provincesDe(b).some(p => estCotiere(p));
+  if (!nationsEnContact(a, b) && !porteeNavale) return { ok: false, raison: RAISON_CONTACT };
   if (aPacte(a, b)) return { ok: false, raison: 'Un pacte de non-agression vous lie' };
   if (allies(a, b)) return { ok: false, raison: 'Vous êtes alliés' };
   if (estVassal(b, a) || estVassal(a, b)) return { ok: false, raison: 'Lien de vassalité' };
@@ -809,6 +1066,7 @@ function faireLaPaix(a, b) {
 function proposerAlliance(a, b) {
   if (allies(a, b)) return { ok: false };
   if (enGuerre(a, b)) return { ok: false, raison: 'Vous êtes en guerre' };
+  if (!nationsEnContact(a, b)) return { ok: false, raison: RAISON_CONTACT };
   const cible = nation(b);
   if (!cible.joueur) {
     const rel = cible.relations[a];
@@ -832,6 +1090,7 @@ function romprAlliance(a, b) {
 
 function proposerPacte(a, b) {
   if (aPacte(a, b) || enGuerre(a, b)) return { ok: false };
+  if (!nationsEnContact(a, b)) return { ok: false, raison: RAISON_CONTACT };
   const cible = nation(b);
   if (!cible.joueur && cible.relations[a] < -20) {
     return { ok: false, raison: `${cible.nom} refuse (relations trop mauvaises).` };
@@ -848,6 +1107,7 @@ function aAccord(a, b) { return nation(a).accords.includes(b); }
 function proposerAccordCommercial(a, b) {
   if (aAccord(a, b)) return { ok: false };
   if (enGuerre(a, b)) return { ok: false, raison: 'Impossible en temps de guerre' };
+  if (!nationsEnContact(a, b)) return { ok: false, raison: RAISON_CONTACT };
   const cible = nation(b);
   if (!cible.joueur) {
     const perso = PERSONNALITES[cible.perso];
@@ -981,8 +1241,9 @@ function finDeTour() {
       if (n.joueur) evenementsTour.push('⚠️ Famine ! Votre peuple meurt et vos soldats désertent.');
     } else {
       // Croissance démographique : le peuple nourri prospère
+      const tauxCroissance = n.doctrine === 'agraire' ? 0.65 : 0.5;
       for (const p of provincesDe(n.id)) {
-        if (p.pop < capaciteProvince(p) && Math.random() < 0.5) p.pop++;
+        if (p.pop < capaciteProvince(p) && Math.random() < tauxCroissance) p.pop++;
       }
     }
     // Stabilité se régénère lentement en paix
@@ -1034,6 +1295,23 @@ function finDeTour() {
     const m = G.marche[bien];
     // Marche aléatoire + rappel vers le prix de base
     m.prix = clamp(m.prix * randF(0.95, 1.05) + (MARCHANDISES[bien].prixBase - m.prix) * 0.05, PRIX_MIN, PRIX_MAX);
+  }
+
+  // Batailles navales : les flottes en guerre s'affrontent en mer
+  for (const a of G.nations) {
+    if (!a.vivante || a.flotte === 0) continue;
+    for (const bid of a.guerres) {
+      if (bid <= a.id) continue; // chaque paire une seule fois
+      const b = nation(bid);
+      if (!b.vivante || b.flotte === 0) continue;
+      const pertesA = Math.min(a.flotte, Math.round(b.flotte * randF(0.1, 0.3)));
+      const pertesB = Math.min(b.flotte, Math.round(a.flotte * randF(0.1, 0.3)));
+      a.flotte -= pertesA;
+      b.flotte -= pertesB;
+      if ((a.joueur || b.joueur) && (pertesA || pertesB)) {
+        journal(`⚔️🌊 Bataille navale : ${a.nom} perd ${pertesA} navires, ${b.nom} en perd ${pertesB}.`);
+      }
+    }
   }
 
   // Rotation des compagnies de mercenaires
@@ -1156,6 +1434,14 @@ function migrerSauvegarde() {
     }
   }
   if (!G.mercenaires) { G.mercenaires = []; genererMercenaires(); }
+  if (!G.mode) G.mode = 'aleatoire';
+  for (const n of G.nations) {
+    if (n.flotte === undefined) n.flotte = 0;
+    if (n.doctrine === undefined) { n.doctrine = null; n.doctrineTour = -99; }
+  }
+  for (const p of G.provinces) {
+    if (p.focus === undefined) p.focus = 'equilibre';
+  }
 }
 
 function sauvegardeExiste() {

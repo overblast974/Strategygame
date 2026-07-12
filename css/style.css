@@ -124,6 +124,12 @@ button { font-family: inherit; cursor: pointer; }
 .liste-biens { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
 .titre-section { color: #ffe9a0; font-size: 15px; margin: 14px 0 8px; }
 .pp-emplacements { font-size: 12px; color: #9db2c7; margin: 8px 0 6px; font-weight: 600; }
+.choix-mode { display: flex; gap: 8px; margin: 14px 0 4px; }
+.choix-mode .btn { flex: 1; }
+.rangee-focus { display: flex; gap: 5px; margin-bottom: 10px; }
+.btn-focus { flex: 1; padding: 6px 2px; font-size: 15px; }
+.btn-focus small { font-size: 8.5px; display: block; }
+.btn-focus.actif { border-color: #c9962f; background: #3a3323; }
 .bh-menu {
   background: #223142; color: #e8e2d5;
   border: 1px solid #3a4f66; border-radius: 8px;

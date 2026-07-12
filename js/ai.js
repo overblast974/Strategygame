@@ -22,6 +22,27 @@ function iaJouerTour(nid) {
   // ---- 4. Recruter ----
   iaRecruter(nid, perso, miennes);
 
+  // ---- 4bis. Doctrine, spécialisation, marine ----
+  if (!n.doctrine && n.ere >= 1) {
+    const choix = perso.agression > 0.6 ? 'militariste'
+      : perso.commerce > 0.6 ? 'mercantiliste'
+      : perso.science > 0.6 ? 'rationaliste' : 'agraire';
+    choisirDoctrine(nid, choix);
+  }
+  // Spécialiser une ou deux provinces par tour selon leurs atouts
+  for (let i = 0; i < 2; i++) {
+    const p = pick(miennes);
+    if (p.focus !== 'equilibre') continue;
+    if (p.gisements.length >= 1 && Math.random() < 0.6) definirFocus(p.id, 'minier');
+    else if (perso.science > 0.6) definirFocus(p.id, 'lettre');
+    else if (perso.commerce > 0.6) definirFocus(p.id, 'commercant');
+    else if (p.terrain === 'plaine') definirFocus(p.id, 'agricole');
+  }
+  // Flotte : les nations côtières arment des navires
+  if (nbPorts(nid) > 0 && n.or > 250 && n.flotte < miennes.length && Math.random() < 0.4) {
+    construireNavires(nid, 2);
+  }
+
   // ---- 5. Mercenaires : renfort en temps de guerre ----
   if (n.guerres.length > 0 && Math.random() < 0.35) {
     const idx = G.mercenaires.findIndex(c => c.cout * 1.5 < n.or);

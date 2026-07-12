@@ -600,8 +600,18 @@ function afficherPanneauProvince(pid) {
     }
     if (p.batiments.port > 0 && p.troupes > 1 && !p.aBouge) {
       actions += `<button class="btn" onclick="ouvrirTransportNaval(${pid})">🚢 Transport naval</button>`;
+      if (nation(G.joueur).flotte >= p.troupes - 1 && nation(G.joueur).guerres.length > 0) {
+        actions += `<button class="btn btn-danger" onclick="ouvrirInvasion(${pid})">🌊 Invasion amphibie</button>`;
+      }
     }
     if (actions) html += `<div class="pp-actions">${actions}</div>`;
+
+    // Spécialisation de la province (affectation de la population)
+    html += `<div class="pp-emplacements">👥 Spécialisation :</div><div class="rangee-focus">`;
+    for (const [id, fdef] of Object.entries(FOCUS_PROVINCE)) {
+      html += `<button class="btn btn-focus ${p.focus === id ? 'actif' : ''}" onclick="uiFocus(${pid},'${id}')" title="${fdef.nom}">${fdef.icone}<br><small>${fdef.nom}</small></button>`;
+    }
+    html += `</div>`;
 
     // Bâtiments : seuls les constructibles ici sont proposés
     html += `<div class="pp-emplacements">🏗️ Emplacements : ${emplacementsUtilises(p)}/${emplacementsMax(p)}</div>
@@ -695,6 +705,50 @@ function uiTransporter(source, cible) {
   fermerModale();
   deselectionner();
   majTout();
+}
+
+function uiFocus(pid, focus) {
+  definirFocus(pid, focus);
+  toast(`${FOCUS_PROVINCE[focus].icone} ${G.provinces[pid].nom} devient ${FOCUS_PROVINCE[focus].nom.toLowerCase()}.`);
+  majTout();
+  afficherPanneauProvince(pid);
+}
+
+// Invasion amphibie : choisir la côte ennemie à prendre d'assaut
+function ouvrirInvasion(pid) {
+  const p = G.provinces[pid];
+  const cibles = G.provinces
+    .filter(c => peutAttaquerAmphibie(pid, c.id) && c.proprietaire >= 0)
+    .sort((a, b) => Math.hypot(a.col - p.col, a.row - p.row) - Math.hypot(b.col - p.col, b.row - p.row))
+    .slice(0, 10);
+  if (!cibles.length) {
+    toast('Aucune côte ennemie à portée (guerre et flotte suffisante requises).');
+    return;
+  }
+  let boutons = '';
+  for (const c of cibles) {
+    boutons += `<button class="btn btn-choix" onclick="uiInvasion(${pid},${c.id})">
+      ⚔️ ${c.nom} <small>(${nation(c.proprietaire).nom})</small><br><small>garnison ${c.troupes}${c.batiments.fort ? ' · 🏰' : ''}</small>
+    </button>`;
+  }
+  ouvrirModale(`<h2>🌊 Invasion amphibie depuis ${p.nom}</h2>
+    <p>Votre flotte (${nation(G.joueur).flotte} ⛵) débarque <b>${p.troupes - 1}</b> troupes — attaquer depuis la mer inflige un malus de 15 %.</p>
+    <div class="colonne-btn">${boutons}</div>
+    <div class="rangee-btn"><button class="btn" onclick="fermerModale()">Annuler</button></div>`);
+}
+
+function uiInvasion(source, cible) {
+  const c = G.provinces[cible];
+  const r = attaqueAmphibie(source, cible);
+  fermerModale();
+  if (!r.ok) { toast(r.raison || 'Impossible'); return; }
+  const centre = hexCentre(c.col, c.row);
+  fxExplosion(centre.x, centre.y, r.victoire ? 0xffd75e : 0xff5544, r.victoire ? 22 : 14);
+  UI.shake = r.victoire ? 8 : 12;
+  toast(r.victoire ? `🌊 Débarquement réussi ! ${c.nom} est prise.` : `💥 Le débarquement échoue (−${r.pertes} pertes).`);
+  deselectionner();
+  majTout();
+  if (G.fini) verifierFinPartie();
 }
 
 function uiConstruire(pid, type) {
@@ -838,8 +892,10 @@ function ouvrirDiplomatieAvec(nid) {
     if (!allie && !pacte && !monVassal) boutons += `<button class="btn btn-danger" onclick="uiDiplo('guerre',${nid})">⚡ Déclarer la guerre</button>`;
   }
 
+  const contact = nationsEnContact(G.joueur, nid);
   ouvrirModale(`<h2><span class="pastille" style="background:${n.couleur}"></span> ${n.nom}</h2>
-    <p>${PERSONNALITES[n.perso].nom} · ${ERES[n.ere].nom} · ${provincesDe(nid).length} provinces · ⚔️ ${Math.round(puissanceMilitaire(nid))} · Relations : <b>${rel > 0 ? '+' : ''}${rel}</b></p>
+    <p>${PERSONNALITES[n.perso].nom} · ${ERES[n.ere].nom} · ${provincesDe(nid).length} provinces · ⚔️ ${Math.round(puissanceMilitaire(nid))} · ⛵ ${n.flotte} · Relations : <b>${rel > 0 ? '+' : ''}${rel}</b></p>
+    ${contact ? '' : `<p><small>🚫 Nations sans contact : il faut une frontière commune, ou un port de chaque côté, pour traiter ensemble.</small></p>`}
     <div class="colonne-btn">${boutons}</div>
     <div class="rangee-btn"><button class="btn" onclick="ouvrirDiplomatie()">← Retour</button></div>`);
 }
@@ -887,7 +943,19 @@ function ouvrirCommerce() {
   }
   html += `</div>
     <button class="btn" style="width:100%" onclick="uiFetes()">🎉 Organiser des fêtes (${COUT_FETES_EPICES} 🌶️ → +10 🏛️ stabilité)</button>
-    <h3 class="titre-section">🏴 Compagnies de mercenaires</h3>`;
+    <h3 class="titre-section">⛵ Marine de guerre</h3>`;
+  const ports = nbPorts(G.joueur);
+  const blocus = subitBlocus(G.joueur);
+  html += `<div class="ligne-bien">
+    <div class="lb-info">
+      <b>Flotte : ${moi.flotte} ⛵</b>
+      <small>${ports} port(s) · entretien ${Math.floor(moi.flotte / 2)} 💰/tour${blocus >= 0 ? ` · ⛔ BLOCUS par ${nation(blocus).nom} !` : ''}</small>
+    </div>
+    <button class="btn btn-mini btn-principal" ${ports ? '' : 'disabled'} onclick="uiNavires(2)">+2 ⛵<br><small>${COUT_NAVIRE.or * 2}💰 ${COUT_NAVIRE.bois * 2}🪵</small></button>
+    <button class="btn btn-mini btn-principal" ${ports ? '' : 'disabled'} onclick="uiNavires(5)">+5 ⛵<br><small>${COUT_NAVIRE.or * 5}💰 ${COUT_NAVIRE.bois * 5}🪵</small></button>
+  </div>
+  <p><small>Une flotte supérieure impose un <b>blocus</b> aux ennemis (routes coupées, ports affaiblis) et permet les <b>invasions amphibies</b> depuis vos ports. Batailles navales automatiques chaque tour en guerre.</small></p>
+  <h3 class="titre-section">🏴 Compagnies de mercenaires</h3>`;
   if (G.mercenaires.length === 0) {
     html += `<p><small>Aucune compagnie disponible pour l'instant — elles reviennent régulièrement.</small></p>`;
   }
@@ -920,6 +988,14 @@ function uiFetes() {
   const r = organiserFetes(G.joueur);
   if (!r.ok) toast(r.raison);
   else toast('🎉 Le peuple festoie ! (+10 stabilité)');
+  majBarre();
+  ouvrirCommerce();
+}
+
+function uiNavires(q) {
+  const r = construireNavires(G.joueur, q);
+  if (!r.ok) toast(r.raison);
+  else toast(`⛵ ${q} navires rejoignent votre flotte !`);
   majBarre();
   ouvrirCommerce();
 }
@@ -966,7 +1042,16 @@ function ouvrirTechnologie() {
       ${actuelle ? '<span class="badge">ACTUELLE</span>' : atteinte ? '<span class="badge ok">✓</span>' : ''}
     </div>`;
   }
-  html += `</div>`;
+  html += `</div><h3 class="titre-section">🏛️ Doctrine nationale</h3>`;
+  const delaiOk = G.tour - moi.doctrineTour >= DELAI_DOCTRINE;
+  for (const [id, d] of Object.entries(DOCTRINES)) {
+    const active = moi.doctrine === id;
+    html += `<button class="btn btn-choix ${active ? 'btn-principal' : ''}" ${active || !delaiOk && moi.doctrine ? 'disabled' : ''}
+      onclick="uiDoctrine('${id}')">${d.icone} ${d.nom} ${active ? '· ACTIVE' : ''}<br><small>${d.desc}</small></button>`;
+  }
+  if (moi.doctrine && !delaiOk) {
+    html += `<p><small>Changement possible dans ${DELAI_DOCTRINE - (G.tour - moi.doctrineTour)} tours.</small></p>`;
+  }
   if (moi.ere >= 4) {
     if (moi.ascensionActive) {
       html += `<div class="carte-ere actuelle"><span class="ere-icone">🌌</span>
@@ -982,6 +1067,14 @@ function ouvrirTechnologie() {
 function uiAscension() {
   const r = lancerAscension(G.joueur);
   if (!r.ok) toast(r.raison);
+  majTout();
+  ouvrirTechnologie();
+}
+
+function uiDoctrine(id) {
+  const r = choisirDoctrine(G.joueur, id);
+  if (!r.ok && r.raison) toast(r.raison);
+  else if (r.ok) toast(`${DOCTRINES[id].icone} Doctrine ${DOCTRINES[id].nom.toLowerCase()} adoptée !`);
   majTout();
   ouvrirTechnologie();
 }
@@ -1140,21 +1233,27 @@ function prochainToast() {
 // ---------- Écran titre ----------
 function afficherEcranTitre() {
   UI.ecran = 'titre';
+  if (!UI.mode) UI.mode = 'terre';
   const el = document.getElementById('ecran-titre');
+  const defs = UI.mode === 'terre' ? NATIONS_TERRE : NATIONS_DEFS;
   let cartes = '';
-  NATIONS_DEFS.forEach((d, i) => {
+  defs.forEach((d, i) => {
     const p = PERSONNALITES[d.perso];
     cartes += `<div class="carte-nation choix-nation" onclick="demarrerPartie(${i})">
       <span class="pastille" style="background:${d.couleur}"></span>
-      <div class="cn-info"><b>${d.nom}</b><small>${p.nom}</small></div>
+      <div class="cn-info"><b>${d.nom}</b><small>${p.nom}${UI.mode === 'terre' ? ' · capitale : ' + d.nomCapitale : ''}</small></div>
     </div>`;
   });
   el.innerHTML = `
     <div class="titre-bloc">
       <h1>⚔️ Chroniques des Ères</h1>
-      <p class="sous-titre">Du Moyen Âge à la conquête des étoiles.<br>Guerre · Diplomatie · Alliances · Technologie</p>
+      <p class="sous-titre">De l'an 1000 à la conquête des étoiles.<br>Guerre · Diplomatie · Commerce · Technologie</p>
       ${sauvegardeExiste() ? '<button class="btn btn-principal btn-large" onclick="reprendrePartie()">▶️ Reprendre la partie</button>' : ''}
-      <h3>Choisissez votre nation</h3>
+      <div class="choix-mode">
+        <button class="btn ${UI.mode === 'terre' ? 'btn-principal' : ''}" onclick="UI.mode='terre';afficherEcranTitre()">🌍 Terre — An 1000</button>
+        <button class="btn ${UI.mode === 'aleatoire' ? 'btn-principal' : ''}" onclick="UI.mode='aleatoire';afficherEcranTitre()">🎲 Monde aléatoire</button>
+      </div>
+      <h3>Choisissez votre ${UI.mode === 'terre' ? 'puissance historique' : 'nation'}</h3>
       <div class="liste-nations">${cartes}</div>
     </div>`;
   el.style.display = 'flex';
@@ -1163,7 +1262,7 @@ function afficherEcranTitre() {
 
 function demarrerPartie(nid) {
   supprimerSauvegarde();
-  nouvellePartie(nid);
+  nouvellePartie(nid, UI.mode);
   lancerJeu();
 }
 

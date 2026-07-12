@@ -280,6 +280,27 @@ const EVENEMENTS = [
   },
 ];
 
+// ---- Doctrines nationales (une seule active, changement limité) ----
+const DOCTRINES = {
+  militariste:   { nom: 'Militariste',   icone: '🗡️', desc: 'Recrues −20 % d\'or · force d\'attaque +10 %' },
+  mercantiliste: { nom: 'Mercantiliste', icone: '💰', desc: 'Or de production +20 % · ventes au marché +10 %' },
+  rationaliste:  { nom: 'Rationaliste',  icone: '📚', desc: 'Science +25 %' },
+  agraire:       { nom: 'Agraire',       icone: '🌾', desc: 'Nourriture +25 % · croissance démographique accélérée' },
+};
+const DELAI_DOCTRINE = 15; // tours minimum entre deux changements
+
+// ---- Spécialisation des provinces (affectation de la population) ----
+const FOCUS_PROVINCE = {
+  equilibre:  { nom: 'Équilibré',  icone: '⚖️' },
+  agricole:   { nom: 'Agricole',   icone: '🌾' },  // +50 % nourriture, −25 % le reste
+  minier:     { nom: 'Minier',     icone: '⛏️' },  // +50 % marchandises
+  lettre:     { nom: 'Lettré',     icone: '📚' },  // +50 % science
+  commercant: { nom: 'Commerçant', icone: '💰' },  // +50 % or
+};
+
+// ---- Marine de guerre ----
+const COUT_NAVIRE = { or: 40, bois: 15 };
+
 // Syllabes pour générer les noms de provinces
 const SYLLABES_A = ['Bel', 'Cor', 'Dun', 'Fal', 'Gar', 'Hol', 'Kel', 'Lor', 'Mar', 'Nor', 'Or', 'Pel', 'Ras', 'Sil', 'Tor', 'Val', 'Wes', 'Yr', 'Zan', 'Ald'];
 const SYLLABES_B = ['a', 'e', 'i', 'o', 'u', 'ae', 'ia', 'ou'];

@@ -16,8 +16,12 @@ La partie est **sauvegardée automatiquement** à chaque fin de tour (localStora
 
 | Système | Détails |
 |---|---|
-| **Carte** | Monde façon Terre de ~570 provinces hexagonales : continents générés procéduralement séparés par des océans, déserts vers l'équateur, toundra aux pôles, eaux côtières. Pan au doigt, pinch pour zoomer. |
+| **Deux mondes** | 🌍 **Terre historique — An 1000** : la carte du monde réel (~1040 hexagones) avec les 12 puissances de l'époque — France capétienne, Saint-Empire, Angleterre, Califat de Cordoue, Byzance, Fatimides, Rus' de Kiev, Empire Song, Japon Heian, Cholas, Ghana, Toltèques — leurs **provinces historiques** (Normandie, Anatolie, Sichuan…) et les cités-états de l'époque (Venise, Novgorod, Angkor, Cuzco…). Ou 🎲 **Monde aléatoire** : continents procéduraux, nations fictives. |
 | **12 nations** | Chacune avec une personnalité d'IA : conquérant, diplomate, marchand, savant, opportuniste, expansionniste. |
+| **Contact** | On ne traite qu'avec les nations **en contact** : frontière commune, ou un port de chaque côté — construire des ports ouvre le monde. |
+| **Marine** ⛵ | Navires de guerre construits dans les ports : **batailles navales** automatiques en guerre, **blocus** (flotte très supérieure = routes coupées et ports affaiblis chez l'ennemi), **invasions amphibies** sur toute côte ennemie. |
+| **Doctrines** 🏛️ | Une doctrine nationale au choix (militariste, mercantiliste, rationaliste, agraire) avec bonus exclusifs, changeable tous les 15 tours. |
+| **Spécialisation** | Chaque province peut être orientée : agricole, minière, lettrée, commerçante (+50 % sur la voie choisie, −25 % ailleurs). |
 | **Cités-états** 🏛️ | 7 cités libres fortifiées (Byzance, Samarkande, Palmyre…) annexables par la négociation (contre de l'or, si votre territoire les borde) ou par la force. |
 | **Mercenaires** 🏴 | 3 compagnies libres à engager contre de l'or (Lames Noires, Compagnie du Faucon…), renouvelées tous les 6 tours. Les IA en guerre les embauchent aussi. |
 | **5 ères** | Moyen Âge → Renaissance → Industrielle → Moderne → Futuriste. Les unités évoluent (chevaliers → mousquetaires → fusiliers → blindés → mechas) ainsi que les bâtiments. |
