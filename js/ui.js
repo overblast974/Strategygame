@@ -10,7 +10,8 @@ const UI = {
   monde: null,          // conteneur racine de la carte (caméra)
   couches: {},          // conteneurs par couche
   gfx: {},              // objets Graphics dynamiques
-  pool: { noms: new Map(), icones: new Map(), effectifs: new Map(), decor: new Map() },
+  pool: { noms: new Map(), icones: new Map(), effectifs: new Map(), decor: new Map(), gisements: new Map() },
+  modeCarte: 'politique',   // politique | terrain | ressources | militaire
   particules: [],
   cam: { x: 0, y: 0, zoom: 1 },
   shake: 0,
@@ -107,7 +108,7 @@ function initPixi() {
 
   // Couches (ordre de dessin)
   for (const nom of ['eau', 'vagues', 'terrain', 'politique', 'frontieres', 'routes', 'decor',
-                     'surbrillance', 'unites', 'icones', 'noms', 'fx']) {
+                     'gisements', 'surbrillance', 'unites', 'icones', 'noms', 'fx']) {
     UI.couches[nom] = new PIXI.Container();
     UI.monde.addChild(UI.couches[nom]);
   }
@@ -207,6 +208,15 @@ function construireCarteStatique() {
       UI.pool.decor.set(p.id, txt);
     }
 
+    // Icônes de gisements (visibles en mode Ressources)
+    if (p.gisements.length) {
+      const gtxt = new PIXI.Text(p.gisements.map(g => ICONES_GISEMENTS[g]).join(''), { fontSize: s * 0.42 });
+      gtxt.anchor.set(0.5);
+      gtxt.position.set(c.x, c.y - s * 0.1);
+      UI.couches.gisements.addChild(gtxt);
+      UI.pool.gisements.set(p.id, gtxt);
+    }
+
     // Nom de la province (ombre portée via style)
     const nom = new PIXI.Text(p.nom, {
       fontFamily: 'sans-serif', fontSize: s * 0.2, fontWeight: '600',
@@ -246,20 +256,26 @@ function dessiner() {
   const gSel = UI.gfx.selection; gSel.clear();
   const gUni = UI.gfx.unites; gUni.clear();
 
+  // Opacité politique selon le mode de carte
+  const modeC = UI.modeCarte;
+  const alphaPol = modeC === 'terrain' ? 0 : modeC === 'ressources' ? 0.25 : modeC === 'militaire' ? 0.82 : 0.61;
+
   for (const p of G.provinces) {
     if (p.terrain === 'eau') continue;
     const c = hexCentre(p.col, p.row);
     const pts = hexSommets(c.x, c.y, s - 0.5);
 
     // Teinte politique
-    if (p.proprietaire >= 0) {
-      gPol.beginFill(couleurNum(nation(p.proprietaire).couleur), 0.61);
-      gPol.drawPolygon(pts.flat());
-      gPol.endFill();
-    } else {
-      gPol.beginFill(0x000000, 0.22);
-      gPol.drawPolygon(pts.flat());
-      gPol.endFill();
+    if (alphaPol > 0) {
+      if (p.proprietaire >= 0) {
+        gPol.beginFill(couleurNum(nation(p.proprietaire).couleur), alphaPol);
+        gPol.drawPolygon(pts.flat());
+        gPol.endFill();
+      } else {
+        gPol.beginFill(0x000000, 0.22 * alphaPol / 0.61);
+        gPol.drawPolygon(pts.flat());
+        gPol.endFill();
+      }
     }
 
     // Côtes et frontières nationales
@@ -556,6 +572,21 @@ function deselectionner() {
   dessiner();
 }
 
+// ---------- Modes de carte (calques) ----------
+function changerModeCarte(mode) {
+  UI.modeCarte = mode;
+  // Visibilité des couches selon le calque choisi
+  UI.couches.gisements.visible = mode === 'ressources';
+  UI.couches.decor.visible = mode !== 'ressources' && mode !== 'militaire';
+  UI.couches.unites.visible = mode !== 'ressources';
+  document.querySelectorAll('#modes-carte button').forEach(b => {
+    b.classList.toggle('actif', b.dataset.mode === mode);
+  });
+  const noms = { politique: '🏛️ Vue politique', terrain: '🗺️ Vue terrain', ressources: '📦 Vue des gisements', militaire: '⚔️ Vue militaire' };
+  toast(noms[mode]);
+  dessiner();
+}
+
 // ---------- Panneaux ----------
 function afficherPanneauProvince(pid) {
   const p = G.provinces[pid];
@@ -567,17 +598,23 @@ function afficherPanneauProvince(pid) {
 
   const gisements = p.gisements.map(g => ICONES_GISEMENTS[g]).join(' ');
   const rendement = Math.round(facteurTravail(p) * 100);
+  const prod = productionProvince(p, n && subitBlocus(p.proprietaire) >= 0);
+  const biensTxt = Object.entries(prod.biens).map(([b, v]) => `${ICONES_GISEMENTS[b]} +${v}`).join(' ');
+  const orGisement = p.gisements.includes('or');
   let html = `<div class="pp-titre">
     <span class="pastille" style="background:${n ? n.couleur : '#777'}"></span>
-    <b>${p.nom}</b> ${p.capitale ? '★' : ''}
+    <b>${p.nom}</b> ${p.capitale ? '★' : ''} ${FOCUS_PROVINCE[p.focus] && p.focus !== 'equilibre' ? FOCUS_PROVINCE[p.focus].icone : ''}
     <span class="pp-sous">${t.nom} · ${n ? n.nom : (p.citeEtat ? '🏛️ Cité-état libre' : 'Indépendante')}</span>
     <button class="fermer" onclick="deselectionner()">✕</button>
   </div>
+  <div class="pp-prod">Produit chaque tour :
+    <b>💰 ${prod.or.toFixed(1)} · 🌾 ${prod.nourriture.toFixed(1)} · 🔬 ${prod.science.toFixed(1)}${biensTxt ? ' · ' + biensTxt : ''}</b>
+  </div>
   <div class="pp-stats">
-    <span>👥 ${p.pop}/${capaciteProvince(p)} <small>(${rendement}%)</small></span>
-    ${gisements ? `<span>Gisements : ${gisements}</span>` : '<span>Aucun gisement</span>'}
-    <span>🛡️ ×${(t.defense * (1 + p.batiments.fort * BATIMENTS.fort.bonus)).toFixed(1)}</span>
-    <span>⚔️ ${p.troupes} (${TYPES_UNITES.inf.icone}${p.armee.inf} ${TYPES_UNITES.choc.icone}${p.armee.choc} ${TYPES_UNITES.siege.icone}${p.armee.siege})${monTour && p.aBouge ? ' · a agi' : ''}</span>
+    <span>👥 ${p.pop}/${capaciteProvince(p)} habitants <small>· bras : ${rendement} %</small></span>
+    <span>Gisements : ${gisements || 'aucun'}${orGisement && !p.batiments.mine_or ? ' <small>(🪙 : bâtir une mine d\'or !)</small>' : ''}</span>
+    <span>🛡️ Défense ×${(t.defense * (1 + p.batiments.fort * BATIMENTS.fort.bonus)).toFixed(1)}</span>
+    <span>⚔️ ${p.troupes} soldats (${TYPES_UNITES.inf.icone}${p.armee.inf} ${TYPES_UNITES.choc.icone}${p.armee.choc} ${TYPES_UNITES.siege.icone}${p.armee.siege})${monTour && p.aBouge ? ' · a agi' : ''}</span>
   </div>`;
 
   if (monTour) {
@@ -727,8 +764,11 @@ function ouvrirInvasion(pid) {
   }
   let boutons = '';
   for (const c of cibles) {
+    const sim = simulerBataille(pid, c.id, true, 120);
+    const pct = Math.round(sim.pVictoire * 100);
+    const coul = pct >= 70 ? '#5c5' : pct >= 45 ? '#cc5' : '#e55';
     boutons += `<button class="btn btn-choix" onclick="uiInvasion(${pid},${c.id})">
-      ⚔️ ${c.nom} <small>(${nation(c.proprietaire).nom})</small><br><small>garnison ${c.troupes}${c.batiments.fort ? ' · 🏰' : ''}</small>
+      ⚔️ ${c.nom} <small>(${nation(c.proprietaire).nom})</small> — <b style="color:${coul}">${pct} %</b><br><small>garnison ${c.troupes}${c.batiments.fort ? ' · 🏰' : ''}</small>
     </button>`;
   }
   ouvrirModale(`<h2>🌊 Invasion amphibie depuis ${p.nom}</h2>
@@ -783,14 +823,23 @@ function ouvrirAttaque(source, cible) {
   const s = G.provinces[source], c = G.provinces[cible];
   const defNom = c.proprietaire >= 0 ? nation(c.proprietaire).nom : 'Indépendants';
   const engages = s.troupes - 1;
-  const ereDef = c.proprietaire >= 0 ? nation(c.proprietaire).ere : 0;
-  const reducSiege = Math.max(0.35, 1 - s.armee.siege * 0.12);
-  const puissDef = Math.max(1, forceDefense(c.armee, ereDef)) *
-    (1 + c.batiments.fort * BATIMENTS.fort.bonus * reducSiege) * TERRAINS[c.terrain].defense;
-  const puissAtt = forceAttaque(s.armee, nation(G.joueur).ere) * engages / Math.max(1, s.troupes);
-  const chances = puissAtt > puissDef * 1.3 ? 'Très favorables' : puissAtt > puissDef ? 'Favorables' : puissAtt > puissDef * 0.7 ? 'Incertaines' : 'Défavorables';
-  const noteSiege = s.armee.siege > 0 && c.batiments.fort > 0
-    ? `<p>💣 Vos armes de siège réduisent la forteresse de ${Math.round((1 - reducSiege) * 100)} %.</p>` : '';
+  const sim = simulerBataille(source, cible);
+  const pct = Math.round(sim.pVictoire * 100);
+  const coulPct = pct >= 70 ? '#5c5' : pct >= 45 ? '#cc5' : '#e55';
+  const totalForce = sim.forceAtt + sim.forceDef;
+  // Modificateurs lisibles
+  const mods = [];
+  if (sim.bonusTerrain > 1) mods.push(`terrain ${TERRAINS[c.terrain].nom.toLowerCase()} : défense ×${sim.bonusTerrain.toFixed(1)}`);
+  if (c.batiments.fort > 0) mods.push(`🏰 forteresse niv.${c.batiments.fort} : défense ×${sim.bonusFort.toFixed(2)}`);
+  if (s.armee.siege > 0 && c.batiments.fort > 0) mods.push(`💣 siège : fortifications −${Math.round((1 - sim.reducSiege) * 100)} %`);
+  if (sim.multAtt > 1.01) mods.push(`vos bonus (doctrine, souverain) : attaque ×${sim.multAtt.toFixed(2)}`);
+  const noteSiege = mods.length ? `<p><small>${mods.join('<br>')}</small></p>` : '';
+  const chances = `<div class="duel">
+      <div class="duel-barre"><div class="duel-att" style="width:${Math.round(sim.forceAtt / totalForce * 100)}%"></div></div>
+      <div class="duel-libelle"><span>⚔️ Vous : ${sim.forceAtt}</span><span>${sim.forceDef} : Eux 🛡️</span></div>
+    </div>
+    <p style="text-align:center;font-size:17px">Victoire estimée : <b style="color:${coulPct}">${pct} %</b><br>
+    <small>pertes attendues : ~${sim.pertesSiVictoire} si victoire · ~${sim.pertesSiDefaite} si défaite (sur 300 batailles simulées)</small></p>`;
 
   UI._attaque = () => {
     const r = resoudreAttaque(source, cible);
@@ -803,10 +852,10 @@ function ouvrirAttaque(source, cible) {
     if (G.fini) verifierFinPartie();
   };
   ouvrirModale(`<h2>⚔️ Attaquer ${c.nom}</h2>
-    <p>${defNom} — garnison de <b>${c.troupes}</b> (${TYPES_UNITES.inf.icone}${c.armee.inf} ${TYPES_UNITES.choc.icone}${c.armee.choc} ${TYPES_UNITES.siege.icone}${c.armee.siege}) ${c.batiments.fort ? '· 🏰 forteresse' : ''} · terrain ${TERRAINS[c.terrain].nom.toLowerCase()}</p>
-    <p>Vous engagez <b>${engages}</b> unités (${TYPES_UNITES.inf.icone}${s.armee.inf} ${TYPES_UNITES.choc.icone}${s.armee.choc} ${TYPES_UNITES.siege.icone}${s.armee.siege}, 1 reste en garnison).</p>
+    <p><small>${defNom} — garnison ${c.troupes} (${TYPES_UNITES.inf.icone}${c.armee.inf} ${TYPES_UNITES.choc.icone}${c.armee.choc} ${TYPES_UNITES.siege.icone}${c.armee.siege}) ·
+    vous engagez ${engages} (${TYPES_UNITES.inf.icone}${s.armee.inf} ${TYPES_UNITES.choc.icone}${s.armee.choc} ${TYPES_UNITES.siege.icone}${s.armee.siege}, 1 en garnison)</small></p>
+    ${chances}
     ${noteSiege}
-    <p>Estimation : <b>${chances}</b></p>
     <div class="rangee-btn">
       <button class="btn btn-danger" onclick="UI._attaque();fermerModale()">À l'assaut !</button>
       <button class="btn" onclick="fermerModale()">Annuler</button>
@@ -1121,6 +1170,9 @@ function uiFinDeTour() {
   sauvegarder();
   majTout();
 
+  // Résumé des revenus du tour
+  const rev = revenus(G.joueur);
+  toast(`Tour ${G.tour} : ${rev.or >= 0 ? '+' : ''}${rev.or} 💰 · ${rev.nourriture >= 0 ? '+' : ''}${rev.nourriture} 🌾 · +${rev.science} 🔬`);
   for (const msg of evenementsTour) toast(msg);
   if (G.message) {
     const m = G.message; G.message = null;
@@ -1161,14 +1213,71 @@ function majBarre() {
   const rev = revenus(G.joueur);
   const fmt = (v, r) => `${Math.floor(v)}<small class="${r >= 0 ? 'pos' : 'neg'}">${r >= 0 ? '+' : ''}${r}</small>`;
   document.getElementById('barre-haut').innerHTML = `
-    <span class="bh-nation"><span class="pastille" style="background:${moi.couleur}"></span>${moi.nom}</span>
-    <span title="Or">💰 ${fmt(moi.or, rev.or)}</span>
-    <span title="Nourriture">🌾 ${fmt(moi.nourriture, rev.nourriture)}</span>
-    <span title="Science">🔬 ${fmt(moi.science, rev.science)}</span>
-    <span title="Stabilité">🏛️ ${Math.floor(moi.stabilite)}%</span>
-    <span title="Population">👥 ${rev.popTotale}</span>
-    <span class="bh-ere">${ERES[moi.ere].icone} ${ERES[moi.ere].nom} · An ${G.annee}</span>
+    <span class="bh-nation" onclick="ouvrirResume()"><span class="pastille" style="background:${moi.couleur}"></span>${moi.nom}</span>
+    <span onclick="ouvrirResume()" title="Or">💰 ${fmt(moi.or, rev.or)}</span>
+    <span onclick="ouvrirResume()" title="Nourriture">🌾 ${fmt(moi.nourriture, rev.nourriture)}</span>
+    <span onclick="ouvrirResume()" title="Science">🔬 ${fmt(moi.science, rev.science)}</span>
+    <span onclick="ouvrirResume()" title="Stabilité">🏛️ ${Math.floor(moi.stabilite)}%</span>
+    <span onclick="ouvrirResume()" title="Population">👥 ${rev.popTotale}</span>
+    <span class="bh-ere" onclick="ouvrirResume()">${ERES[moi.ere].icone} An ${G.annee} 📊</span>
     <button class="bh-menu" onclick="ouvrirMenu()">⚙️</button>`;
+}
+
+// ---------- Écran Empire (détail des revenus et forces) ----------
+function ligneDetail(label, valeur, icone) {
+  if (!valeur) return '';
+  const cls = valeur > 0 ? 'pos' : 'neg';
+  return `<div class="ligne-detail"><span>${label}</span><b class="${cls}">${valeur > 0 ? '+' : ''}${valeur} ${icone}</b></div>`;
+}
+
+function ouvrirResume() {
+  const moi = nation(G.joueur);
+  const rev = revenus(G.joueur);
+  const d = rev.detail;
+  const prod = productionMarchandises(G.joueur);
+  // Armée totale
+  const total = armeeVide();
+  for (const p of provincesDe(G.joueur)) {
+    total.inf += p.armee.inf; total.choc += p.armee.choc; total.siege += p.armee.siege;
+  }
+  // Progression vers la prochaine ère
+  const prochaine = ERES[moi.ere + 1];
+  const barre = prochaine
+    ? `<div class="barre-prog"><div class="barre-prog-int" style="width:${Math.min(100, Math.round(moi.science / prochaine.seuil * 100))}%"></div></div>
+       <p><small>${Math.floor(moi.science)} / ${prochaine.seuil} 🔬 vers « ${prochaine.nom} » (+${rev.science}/tour)</small></p>`
+    : '<p><small>Ère finale atteinte — visez l\'Ascension Stellaire !</small></p>';
+
+  ouvrirModale(`<h2>📊 ${moi.nom}</h2>
+    ${d.bloque ? '<p><b>⛔ BLOCUS NAVAL !</b> Routes maritimes coupées, ports affaiblis.</p>' : ''}
+    ${d.instable ? '<p><b>⚠️ Instabilité !</b> (stabilité < 50) Tous les revenus sont réduits de 30 %.</p>' : ''}
+    <h3 class="titre-section">💰 Or : ${rev.or >= 0 ? '+' : ''}${rev.or}/tour</h3>
+    ${ligneDetail('Provinces (terrain, marchés, ports, mines d\'or)', d.orProvinces, '💰')}
+    ${ligneDetail('Doctrine et souverain', d.orBonus, '💰')}
+    ${ligneDetail('Impôts (' + rev.popTotale + ' 👥 × 0,15)', d.impots, '💰')}
+    ${ligneDetail('Commerce (accords et routes maritimes)', d.commerce, '💰')}
+    ${ligneDetail('Tributs des vassaux', d.tribut, '💰')}
+    ${ligneDetail('Versé au suzerain', -d.verse, '💰')}
+    ${ligneDetail('Entretien de l\'armée (' + d.troupes + ' ⚔️)', -d.entretienArmee, '💰')}
+    ${ligneDetail('Entretien de la flotte (' + moi.flotte + ' ⛵)', -d.entretienFlotte, '💰')}
+    <h3 class="titre-section">🌾 Nourriture : ${rev.nourriture >= 0 ? '+' : ''}${rev.nourriture}/tour</h3>
+    ${ligneDetail('Provinces et fermes', d.nourProvinces, '🌾')}
+    ${ligneDetail('Doctrine agraire', d.nourBonus, '🌾')}
+    ${ligneDetail('Ravitaillement des troupes', -d.rationTroupes, '🌾')}
+    <h3 class="titre-section">🔬 Science : +${rev.science}/tour</h3>
+    ${barre}
+    <h3 class="titre-section">📦 Production /tour</h3>
+    <div class="pp-stats">${Object.entries(MARCHANDISES).map(([b, def]) =>
+      `<span>${def.icone} ${moi.marchandises[b] | 0} <small class="pos">+${prod[b]}</small></span>`).join('')}</div>
+    <h3 class="titre-section">⚔️ Forces armées</h3>
+    <div class="pp-stats">
+      <span>${TYPES_UNITES.inf.icone} ${total.inf} ${TYPES_UNITES.inf.noms[moi.ere]}</span>
+      <span>${TYPES_UNITES.choc.icone} ${total.choc} ${TYPES_UNITES.choc.noms[moi.ere]}</span>
+      <span>${TYPES_UNITES.siege.icone} ${total.siege} ${TYPES_UNITES.siege.noms[moi.ere]}</span>
+      <span>⛵ ${moi.flotte} navires</span>
+    </div>
+    <p><small>👑 ${moi.dirigeant.nom} (${moi.dirigeant.age} ans) · ${moi.doctrine ? DOCTRINES[moi.doctrine].icone + ' ' + DOCTRINES[moi.doctrine].nom : 'Aucune doctrine (voir Techno)'} ·
+    ${provincesDe(G.joueur).length} provinces</small></p>
+    <div class="rangee-btn"><button class="btn" onclick="fermerModale()">Fermer</button></div>`);
 }
 
 // ---------- Menu & sauvegardes manuelles ----------
@@ -1216,6 +1325,38 @@ function uiChargerSlot(s) {
 function uiRetourTitre() {
   fermerModale();
   afficherEcranTitre();
+}
+
+// ---------- Aide & légende ----------
+function ouvrirAide() {
+  let terrains = '';
+  for (const [id, t] of Object.entries(TERRAINS)) {
+    if (id === 'eau') continue;
+    const g = (GISEMENTS_PAR_TERRAIN[id] || []).map(([b]) => ICONES_GISEMENTS[b]).join('');
+    terrains += `<div class="ligne-detail"><span>${DECOR_TERRAIN[id] || '🟩'} ${t.nom}</span>
+      <small>🌾${t.nourriture} 💰${t.or} 🔬${t.science} · déf ×${t.defense}${g ? ' · ' + g : ''}</small></div>`;
+  }
+  let unites = '';
+  for (const [id, u] of Object.entries(TYPES_UNITES)) {
+    unites += `<div class="ligne-detail"><span>${u.icone} ${u.noms[nation(G.joueur).ere]}</span>
+      <small>att ×${u.attaque} · déf ×${u.defense} · ${u.cout.or}💰 ${u.cout.nourriture}🌾${u.cout.fer ? ' ' + u.cout.fer + '⚒️' : ''}${u.cout.pierre ? ' ' + u.cout.pierre + '🪨' : ''} + 1👥</small></div>`;
+  }
+  ouvrirModale(`<h2>❓ Aide</h2>
+    <h3 class="titre-section">Terrains</h3>${terrains}
+    <h3 class="titre-section">Unités (${ERES[nation(G.joueur).ere].nom})</h3>${unites}
+    <h3 class="titre-section">Les clés du jeu</h3>
+    <p><small>
+    📊 <b>Tapez la barre du haut</b> pour le détail complet de vos revenus.<br>
+    🗺️ Les boutons en haut à gauche changent la <b>vue de la carte</b> : politique, terrain, gisements 📦, militaire.<br>
+    👥 La <b>population</b> travaille (rendement max à 8+) et fournit les recrues. Démobilisez pour repeupler.<br>
+    ⛏️ Un <b>gisement</b> produit 1/tour ; avec son bâtiment (mine, scierie…) : jusqu'à 7/tour.<br>
+    🏗️ <b>4 emplacements</b> de bâtiment par province : spécialisez-vous !<br>
+    ⚓ Le <b>port</b> ouvre le commerce maritime, le contact avec les nations lointaines et les invasions.<br>
+    🕊️ On ne traite qu'avec les nations <b>en contact</b> (frontière ou ports des deux côtés).<br>
+    💍 <b>Mariages royaux</b> et cadeaux montent les relations ; les alliés rejoignent vos guerres défensives.<br>
+    🏆 <b>3 victoires</b> : domination (55 % des terres), science (Ascension), diplomatie (allié avec tous).
+    </small></p>
+    <div class="rangee-btn"><button class="btn" onclick="fermerModale()">Fermer</button></div>`);
 }
 
 // ---------- Dynastie ----------

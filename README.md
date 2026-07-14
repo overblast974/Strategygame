@@ -36,6 +36,7 @@ La partie est **sauvegardée automatiquement** à chaque fin de tour (localStora
 | **Commerce naval** ⚓ | Le port (côtier) ouvre des **routes maritimes** avec les partenaires commerciaux équipés de ports (+5 💰/tour chacune, tracées sur la carte) et permet le **transport naval** de troupes entre vos ports. |
 | **Production & commerce** | 4 marchandises échangeables : le fer équipe les unités, le bois et la pierre servent aux bâtiments, les épices remontent la stabilité. **Marché mondial à prix dynamiques** (l'offre et la demande — y compris celles des IA — font bouger les cours) et accords commerciaux entre nations (+8 💰/tour chacun). |
 | **Sauvegardes** 💾 | Sauvegarde automatique chaque tour + **3 emplacements manuels** via le menu ⚙️. |
+| **Lisibilité** 📊 | Tapez la barre du haut → **écran Empire** (revenus détaillés ligne par ligne, forces, progression d'ère). **4 vues de carte** : politique, terrain, gisements, militaire. **Simulation de bataille** avant chaque assaut (probabilité de victoire sur 300 combats simulés, pertes attendues, détail des modificateurs). Aide-légende ❓ intégrée. |
 | **Événements** | Événements narratifs à choix multiples adaptés à votre ère (mariage princier, peste, grève ouvrière, IA émergente…). |
 
 ## 🏆 Trois voies de victoire

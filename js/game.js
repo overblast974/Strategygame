@@ -690,27 +690,46 @@ function nbPorts(nid) {
   return provincesDe(nid).filter(p => p.batiments.port > 0).length;
 }
 
+// Production d'une seule province (avec rendement, focus et blocus)
+function productionProvince(p, bloque = false) {
+  const t = TERRAINS[p.terrain];
+  const f = facteurTravail(p);
+  const portBonus = p.batiments.port * BATIMENTS.port.bonus * (bloque ? 0.5 : 1);
+  const res = {
+    or: (t.or * f + p.batiments.marche * BATIMENTS.marche.bonus + portBonus +
+         p.batiments.mine_or * BATIMENTS.mine_or.bonus * f) * focusMult(p, 'or'),
+    nourriture: (t.nourriture * f + p.batiments.ferme * BATIMENTS.ferme.bonus) * focusMult(p, 'nourriture'),
+    science: (t.science * f + p.batiments.ecole * BATIMENTS.ecole.bonus) * focusMult(p, 'science'),
+    biens: {},
+  };
+  if (p.capitale) { res.or += 4; res.science += 3; }
+  for (const bien of p.gisements) {
+    if (bien === 'or') continue;
+    const bat = BATIMENT_POUR_GISEMENT[bien];
+    res.biens[bien] = Math.round((1 + p.batiments[bat] * BATIMENTS[bat].bonus) * f * focusMult(p, 'marchandise'));
+  }
+  return res;
+}
+
 function revenus(nid) {
   const n = nation(nid);
   const bloque = subitBlocus(nid) >= 0;
   let or_ = 0, nour = 0, sci = 0, popTotale = 0;
   for (const p of provincesDe(nid)) {
-    const t = TERRAINS[p.terrain];
-    const f = facteurTravail(p);
-    const portBonus = p.batiments.port * BATIMENTS.port.bonus * (bloque ? 0.5 : 1);
-    or_ += (t.or * f + p.batiments.marche * BATIMENTS.marche.bonus + portBonus +
-            p.batiments.mine_or * BATIMENTS.mine_or.bonus * f) * focusMult(p, 'or');
-    nour += (t.nourriture * f + p.batiments.ferme * BATIMENTS.ferme.bonus) * focusMult(p, 'nourriture');
-    sci += (t.science * f + p.batiments.ecole * BATIMENTS.ecole.bonus) * focusMult(p, 'science');
+    const prod = productionProvince(p, bloque);
+    or_ += prod.or;
+    nour += prod.nourriture;
+    sci += prod.science;
     popTotale += p.pop;
-    if (p.capitale) { or_ += 4; sci += 3; }
   }
+  const orProvinces = or_, nourProvinces = nour, sciProvinces = sci;
   // Doctrines nationales
   if (n.doctrine === 'mercantiliste') or_ *= 1.2;
   if (n.doctrine === 'agraire') nour *= 1.25;
   if (n.doctrine === 'rationaliste') sci *= 1.25;
   // Un bon intendant sur le trône enrichit le royaume
   if (n.dirigeant) or_ *= 1 + n.dirigeant.intendance * 0.015;
+  const orBonus = or_ - orProvinces; // part due à la doctrine et au souverain
   // Impôts : la population paie
   or_ += popTotale * 0.15;
   // Entretien des troupes et de la flotte
@@ -745,6 +764,61 @@ function revenus(nid) {
     science: Math.floor(sci * mult),
     entretien,
     popTotale,
+    // Décomposition pour l'écran Empire
+    detail: {
+      orProvinces: Math.round(orProvinces),
+      orBonus: Math.round(orBonus),
+      impots: Math.round(popTotale * 0.15),
+      tribut, verse, commerce,
+      entretienArmee: Math.floor(troupes / 2),
+      entretienFlotte: Math.floor(n.flotte / 2),
+      nourProvinces: Math.round(nourProvinces),
+      nourBonus: Math.round(nour - nourProvinces),
+      rationTroupes: Math.ceil(troupes / 3),
+      sciProvinces: Math.round(sciProvinces),
+      sciBonus: Math.round(sci - sciProvinces),
+      instable: mult < 1,
+      bloque,
+      troupes,
+    },
+  };
+}
+
+// Simulation Monte-Carlo d'une attaque (sans modifier l'état du jeu)
+function simulerBataille(source, cible, amphibie = false, essais = 300) {
+  const s = G.provinces[source], c = G.provinces[cible];
+  const att = nation(s.proprietaire);
+  let multAtt = amphibie ? 0.85 : 1;
+  if (att.doctrine === 'militariste') multAtt *= 1.1;
+  if (att.dirigeant) multAtt *= 1 + att.dirigeant.martial * 0.015;
+  // Composition engagée (copie, une garnison reste)
+  const engages = { ...s.armee };
+  retirerComposition(engages, 1); // approximation : la garnison est retirée du plus nombreux
+  const nbEngages = totalArmee(engages);
+  const ereDef = c.proprietaire >= 0 ? nation(c.proprietaire).ere : 0;
+  const reducSiege = Math.max(0.35, 1 - engages.siege * 0.12);
+  const bonusFort = 1 + c.batiments.fort * BATIMENTS.fort.bonus * reducSiege;
+  const bonusTerrain = TERRAINS[c.terrain].defense;
+  const baseAtt = forceAttaque(engages, att.ere) * multAtt;
+  const baseDef = Math.max(1, forceDefense(c.armee, ereDef)) * bonusFort * bonusTerrain;
+
+  let victoires = 0, pertesV = 0, pertesD = 0;
+  for (let i = 0; i < essais; i++) {
+    const ratio = (baseAtt * randF(0.85, 1.2)) / (baseDef * randF(0.85, 1.2));
+    if (ratio > 1) {
+      victoires++;
+      pertesV += Math.min(nbEngages - 1, Math.round(nbEngages * (0.5 / ratio)));
+    } else {
+      pertesD += Math.round(nbEngages * clamp(0.4 + (1 - ratio) * 0.5, 0.4, 0.9));
+    }
+  }
+  return {
+    pVictoire: victoires / essais,
+    pertesSiVictoire: victoires ? Math.round(pertesV / victoires) : 0,
+    pertesSiDefaite: victoires < essais ? Math.round(pertesD / (essais - victoires)) : 0,
+    forceAtt: Math.round(baseAtt),
+    forceDef: Math.round(baseDef),
+    bonusTerrain, bonusFort, reducSiege, multAtt, nbEngages,
   };
 }
 function revenusBruts(nid) {

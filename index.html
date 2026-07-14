@@ -23,6 +23,15 @@
     <div id="barre-haut"></div>
     <canvas id="carte"></canvas>
 
+    <!-- Calques de carte -->
+    <div id="modes-carte">
+      <button data-mode="politique" class="actif" onclick="changerModeCarte('politique')" title="Politique">🏛️</button>
+      <button data-mode="terrain" onclick="changerModeCarte('terrain')" title="Terrain">🗺️</button>
+      <button data-mode="ressources" onclick="changerModeCarte('ressources')" title="Ressources">📦</button>
+      <button data-mode="militaire" onclick="changerModeCarte('militaire')" title="Militaire">⚔️</button>
+      <button onclick="ouvrirAide()" title="Aide">❓</button>
+    </div>
+
     <!-- Panneau province (bas d'écran) -->
     <div id="panneau-province"></div>
 
