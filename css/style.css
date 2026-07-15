@@ -21,7 +21,8 @@ button { font-family: inherit; cursor: pointer; }
 #ecran-titre {
   position: fixed; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  background: url(../assets/fond-ocean.jpg) center / cover no-repeat,
+  background: linear-gradient(180deg, rgba(10, 16, 26, 0.45) 0%, rgba(10, 16, 26, 0.72) 100%),
+              url(../assets/accueil.jpg) center / cover no-repeat,
               radial-gradient(ellipse at 50% 30%, #2c3e50 0%, #10171f 80%);
   overflow-y: auto; touch-action: pan-y;
   padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);

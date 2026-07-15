@@ -9,6 +9,7 @@ const UI = {
   app: null,            // PIXI.Application
   monde: null,          // conteneur racine de la carte (caméra)
   couches: {},          // conteneurs par couche
+  fondCarte: null,      // sprite de la carte du monde (mode Terre)
   gfx: {},              // objets Graphics dynamiques
   pool: { noms: new Map(), icones: new Map(), effectifs: new Map(), decor: new Map(), gisements: new Map() },
   modeCarte: 'politique',   // politique | terrain | ressources | militaire
@@ -107,7 +108,7 @@ function initPixi() {
   UI.app.stage.addChild(UI.monde);
 
   // Couches (ordre de dessin)
-  for (const nom of ['eau', 'vagues', 'terrain', 'politique', 'frontieres', 'routes', 'decor',
+  for (const nom of ['fond', 'eau', 'vagues', 'terrain', 'politique', 'frontieres', 'routes', 'decor',
                      'gisements', 'surbrillance', 'unites', 'icones', 'noms', 'fx']) {
     UI.couches[nom] = new PIXI.Container();
     UI.monde.addChild(UI.couches[nom]);
@@ -142,6 +143,19 @@ function viderPools() {
 function construireCarteStatique() {
   viderPools();
   const s = UI.hexSize;
+
+  // Carte du monde ancienne sous les hexagones (mode Terre uniquement) :
+  // l'image couvre exactement l'étendue de la grille, les hexagones d'eau
+  // semi-transparents la laissent transparaître.
+  if (UI.fondCarte) { UI.fondCarte.destroy(); UI.fondCarte = null; }
+  if (G.mode === 'terre') {
+    const spr = PIXI.Sprite.from('assets/carte-monde.jpg');
+    spr.width = Math.sqrt(3) * s * (MAP_W + 0.5);
+    spr.height = 1.5 * s * (MAP_H - 1) + 2 * s;
+    spr.alpha = 0.92;
+    UI.couches.fond.addChild(spr);
+    UI.fondCarte = spr;
+  }
 
   const gEau = UI.gfx.eau; gEau.clear();
   const gVagues = UI.gfx.vagues; gVagues.clear();
