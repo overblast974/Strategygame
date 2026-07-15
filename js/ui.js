@@ -94,6 +94,23 @@ function areteVers(pts, cVoisin) {
 
 const DECOR_TERRAIN = { foret: '🌲', montagne: '⛰️', desert: '🌵', colline: '🌿', toundra: '❄️' };
 
+// Cache de textures pour les textes répétés (décor, gisements) : indispensable
+// avec 10 000 provinces, un PIXI.Text par case saturerait la mémoire GPU
+const texturesTexte = new Map();
+function spriteTexte(chaine, fontSize) {
+  const cle = fontSize + '|' + chaine;
+  let tex = texturesTexte.get(cle);
+  if (!tex) {
+    const t = new PIXI.Text(chaine, { fontSize });
+    tex = UI.app.renderer.generateTexture(t, { resolution: 2 });
+    t.destroy(true);
+    texturesTexte.set(cle, tex);
+  }
+  const spr = new PIXI.Sprite(tex);
+  spr.anchor.set(0.5);
+  return spr;
+}
+
 // ---------- Initialisation PixiJS ----------
 function initPixi() {
   UI.app = new PIXI.Application({
@@ -212,11 +229,10 @@ function construireCarteStatique() {
     gTerrain.closePath();
     gTerrain.lineStyle(0);
 
-    // Décoration de terrain
+    // Décoration de terrain (sprite à texture partagée)
     const decor = DECOR_TERRAIN[p.terrain];
     if (decor) {
-      const txt = new PIXI.Text(decor, { fontSize: s * 0.3 });
-      txt.anchor.set(0.5);
+      const txt = spriteTexte(decor, s * 0.3);
       txt.alpha = 0.75;
       txt.position.set(c.x - s * 0.48, c.y - s * 0.3);
       UI.couches.decor.addChild(txt);
@@ -225,24 +241,48 @@ function construireCarteStatique() {
 
     // Icônes de gisements (visibles en mode Ressources)
     if (p.gisements.length) {
-      const gtxt = new PIXI.Text(p.gisements.map(g => ICONES_GISEMENTS[g]).join(''), { fontSize: s * 0.42 });
-      gtxt.anchor.set(0.5);
+      const gtxt = spriteTexte(p.gisements.map(g => ICONES_GISEMENTS[g]).join(''), s * 0.42);
       gtxt.position.set(c.x, c.y - s * 0.1);
       UI.couches.gisements.addChild(gtxt);
       UI.pool.gisements.set(p.id, gtxt);
     }
+  }
+  // Les étiquettes de nom sont créées à la demande selon le viewport (majNomsVisibles)
+  nomsCache.zoom = NaN;
+}
 
-    // Nom de la province (ombre portée via style)
-    const nom = new PIXI.Text(p.nom, {
-      fontFamily: 'sans-serif', fontSize: s * 0.2, fontWeight: '600',
-      fill: 0xffffff, dropShadow: true, dropShadowDistance: 1,
-      dropShadowAlpha: 0.7, dropShadowBlur: 1,
-    });
-    nom.anchor.set(0.5);
-    nom.alpha = 0.85;
-    nom.position.set(c.x, c.y + s * 0.62);
-    UI.couches.noms.addChild(nom);
-    UI.pool.noms.set(p.id, nom);
+// Étiquettes de nom créées paresseusement : seules les provinces proches du
+// viewport ont un PIXI.Text (10 000 textes permanents seraient trop lourds)
+const nomsCache = { x: NaN, y: NaN, zoom: NaN };
+function majNomsVisibles() {
+  if (UI.cam.x === nomsCache.x && UI.cam.y === nomsCache.y && UI.cam.zoom === nomsCache.zoom) return;
+  nomsCache.x = UI.cam.x; nomsCache.y = UI.cam.y; nomsCache.zoom = UI.cam.zoom;
+  const s = UI.hexSize;
+  const marge = s * 2;
+  const x1 = -UI.cam.x / UI.cam.zoom - marge;
+  const y1 = -UI.cam.y / UI.cam.zoom - marge;
+  const x2 = (UI.app.screen.width - UI.cam.x) / UI.cam.zoom + marge;
+  const y2 = (UI.app.screen.height - UI.cam.y) / UI.cam.zoom + marge;
+  for (const p of G.provinces) {
+    if (p.terrain === 'eau' || !p.nom) continue;
+    const c = hexCentre(p.col, p.row);
+    const dedans = c.x >= x1 && c.x <= x2 && c.y >= y1 && c.y <= y2;
+    const existant = UI.pool.noms.get(p.id);
+    if (dedans && !existant) {
+      const nom = new PIXI.Text(p.nom, {
+        fontFamily: 'sans-serif', fontSize: s * 0.2, fontWeight: '600',
+        fill: 0xffffff, dropShadow: true, dropShadowDistance: 1,
+        dropShadowAlpha: 0.7, dropShadowBlur: 1,
+      });
+      nom.anchor.set(0.5);
+      nom.alpha = 0.85;
+      nom.position.set(c.x, c.y + s * 0.62);
+      UI.couches.noms.addChild(nom);
+      UI.pool.noms.set(p.id, nom);
+    } else if (!dedans && existant && UI.pool.noms.size > 400) {
+      existant.destroy();
+      UI.pool.noms.delete(p.id);
+    }
   }
 }
 
@@ -429,12 +469,13 @@ function tick() {
   UI.gfx.cibles.alpha = 0.55 + 0.45 * Math.sin(UI.temps * 4);
   UI.gfx.vagues.alpha = 0.5 + 0.5 * Math.sin(UI.temps * 1.2);
 
-  // Noms visibles selon le zoom
+  // Noms visibles selon le zoom (étiquettes créées à la demande)
   const voulu = UI.cam.zoom > 0.75;
   if (voulu !== UI.nomsVisibles) {
     UI.nomsVisibles = voulu;
     UI.couches.noms.visible = voulu;
   }
+  if (voulu && UI.ecran === 'jeu' && G) majNomsVisibles();
 
   // Particules
   if (UI.particules.length) {
@@ -526,7 +567,7 @@ function initGestes() {
 
 function zoomVers(px, py, facteur) {
   const avant = ecranVersMonde(px, py);
-  UI.cam.zoom = clamp(UI.cam.zoom * facteur, 0.14, 2.5);
+  UI.cam.zoom = clamp(UI.cam.zoom * facteur, 0.07, 2.5);
   UI.cam.x = px - avant.x * UI.cam.zoom;
   UI.cam.y = py - avant.y * UI.cam.zoom;
 }
