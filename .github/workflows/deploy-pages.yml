@@ -2,7 +2,7 @@ name: Déployer sur GitHub Pages
 
 on:
   push:
-    branches: [claude/strategy-game-mobile-b0ywgz]
+    branches: [claude/strategy-game-mobile-b0ywgz, main]
   workflow_dispatch:
 
 permissions:
