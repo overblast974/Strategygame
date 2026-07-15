@@ -1,12 +1,13 @@
 // Service worker — met le jeu entièrement en cache pour jouer hors-ligne
 'use strict';
 
-const CACHE = 'chroniques-v9';
+const CACHE = 'chroniques-v10';
 const FICHIERS = [
   './',
   './index.html',
   './manifest.webmanifest',
   './css/style.css',
+  './assets/fond-ocean.jpg',
   './js/lib/pixi.min.js',
   './js/data.js',
   './js/terre.js',

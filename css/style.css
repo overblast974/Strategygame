@@ -21,7 +21,8 @@ button { font-family: inherit; cursor: pointer; }
 #ecran-titre {
   position: fixed; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  background: radial-gradient(ellipse at 50% 30%, #2c3e50 0%, #10171f 80%);
+  background: url(../assets/fond-ocean.jpg) center / cover no-repeat,
+              radial-gradient(ellipse at 50% 30%, #2c3e50 0%, #10171f 80%);
   overflow-y: auto; touch-action: pan-y;
   padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
   z-index: 10;
@@ -42,7 +43,8 @@ button { font-family: inherit; cursor: pointer; }
 #ecran-jeu { position: fixed; inset: 0; }
 #carte {
   position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none;
-  background: linear-gradient(180deg, #0e1c2c 0%, #16324a 50%, #0c1826 100%);
+  background: url(../assets/fond-ocean.jpg) center / cover no-repeat,
+              linear-gradient(180deg, #0e1c2c 0%, #16324a 50%, #0c1826 100%);
 }
 
 /* Barre du haut */

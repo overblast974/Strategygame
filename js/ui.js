@@ -153,12 +153,13 @@ function construireCarteStatique() {
 
     if (p.terrain === 'eau') {
       const pts = hexSommets(c.x, c.y, s + 0.5);
-      // Eaux côtières plus claires, océan profond plus sombre
+      // Eaux côtières plus claires, océan profond plus sombre —
+      // semi-transparentes pour laisser respirer la carte marine en fond
       const cotier = voisinsHex(p.col, p.row).some(i => G.provinces[i].terrain !== 'eau');
       const teinte = cotier
         ? (h < 0.5 ? 0x3c6f92 : 0x407598)
         : (h < 0.33 ? 0x28506e : h < 0.66 ? 0x2b5573 : 0x254a66);
-      gEau.beginFill(teinte);
+      gEau.beginFill(teinte, cotier ? 0.85 : 0.66);
       gEau.drawPolygon(pts.flat());
       gEau.endFill();
       if (h > 0.45) {
