@@ -173,7 +173,7 @@ function construireCarteStatique() {
       const teinte = cotier
         ? (h < 0.5 ? 0x3c6f92 : 0x407598)
         : (h < 0.33 ? 0x28506e : h < 0.66 ? 0x2b5573 : 0x254a66);
-      gEau.beginFill(teinte, cotier ? 0.85 : 0.66);
+      gEau.beginFill(teinte, cotier ? 0.55 : 0.32);
       gEau.drawPolygon(pts.flat());
       gEau.endFill();
       if (h > 0.45) {
