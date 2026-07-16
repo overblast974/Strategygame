@@ -50,7 +50,23 @@ const MARCHANDISES = {
   fer:    { nom: 'Fer',    icone: '⚒️', prixBase: 6 },
   pierre: { nom: 'Pierre', icone: '🪨', prixBase: 5 },
   epices: { nom: 'Épices', icone: '🌶️', prixBase: 9 },
+  // Biens manufacturés (chaînes de production) : bien plus chers que le brut
+  armes:  { nom: 'Armes',  icone: '🗡️', prixBase: 16, manufacture: true },
+  luxe:   { nom: 'Luxe',   icone: '💎', prixBase: 20, manufacture: true },
 };
+
+// Transformations : bâtiment → { source, produit, ratio } (2 brut → 1 manufacturé / niveau / tour)
+const TRANSFORMATIONS = {
+  forge:        { source: 'fer',    produit: 'armes', consomme: 2, produit_qte: 1 },
+  atelier_luxe: { source: 'epices', produit: 'luxe',  consomme: 2, produit_qte: 1 },
+};
+
+// Besoins de la population : 1 bien de luxe pour 15 habitants et par tour
+const LUXE_PAR_POP = 15;
+
+// Prêts (auprès des banquiers) : intérêt par tour
+const TAUX_INTERET = 0.06;
+const DETTE_MAX = 600;
 
 // Bien produit par chaque terrain (2/tour + bonus d'exploitation)
 const TERRAIN_BIEN = { foret: 'bois', montagne: 'fer', colline: 'pierre', desert: 'epices' };
@@ -107,6 +123,8 @@ const BATIMENTS = {
   carriere:   { nom: 'Carrière',    icone: '🪨', type: 'extraction', bien: 'pierre', bonus: 2, coutBase: 45, bois: 8,  pierre: 0 },
   plantation: { nom: 'Plantation',  icone: '🌶️', type: 'extraction', bien: 'epices', bonus: 2, coutBase: 50, bois: 8,  pierre: 0 },
   mine_or:    { nom: 'Mine d\'or',  icone: '🪙', type: 'extraction', bien: 'or',     bonus: 3, coutBase: 65, bois: 8,  pierre: 6 },
+  forge:        { nom: 'Forge',            icone: '🗡️', type: 'commun', bonus: 1, coutBase: 60, bois: 6, pierre: 8 },
+  atelier_luxe: { nom: 'Atelier de luxe',  icone: '💎', type: 'commun', bonus: 1, coutBase: 70, bois: 10, pierre: 4 },
 };
 const NIVEAU_MAX_BATIMENT = 3;
 const EMPLACEMENTS_PROVINCE = 4;   // bâtiments différents max par province (+1 en capitale)
@@ -123,6 +141,8 @@ const NOMS_BATIMENTS_PAR_ERE = {
   carriere:   ['Carrière', 'Carrière taillée', 'Carrière mécanisée', 'Excavatrice géante', 'Foreuse quantique'],
   plantation: ['Plantation', 'Caravansérail', 'Comptoir des épices', 'Agro-tropicale', 'Bio-dôme'],
   mine_or:    ['Mine d\'or', 'Orpaillage royal', 'Mine profonde', 'Extraction chimique', 'Collecteur d\'astéroïdes'],
+  forge:        ['Forge', 'Armurerie', 'Manufacture d\'armes', 'Arsenal', 'Fabrique de plasma'],
+  atelier_luxe: ['Atelier de luxe', 'Maison de soieries', 'Manufacture royale', 'Haute couture', 'Orfèvrerie quantique'],
 };
 
 // Gisements possibles par terrain : [bien, probabilité]

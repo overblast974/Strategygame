@@ -1,7 +1,7 @@
 // Service worker — met le jeu entièrement en cache pour jouer hors-ligne
 'use strict';
 
-const CACHE = 'chroniques-v10';
+const CACHE = 'chroniques-v11';
 const FICHIERS = [
   './',
   './index.html',

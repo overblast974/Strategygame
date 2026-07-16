@@ -43,6 +43,26 @@ function iaJouerTour(nid) {
     construireNavires(nid, 2);
   }
 
+  // ---- 4ter. Général, espions, embargos ----
+  if (!n.general && n.guerres.length > 0 && n.or > 350) {
+    nommerGeneral(nid, -1);
+  }
+  if (perso.science > 0.6 && Math.random() < 0.12) {
+    if (n.espions < 1 && n.or > 300) recruterEspion(nid);
+    else if (n.espions >= 1) {
+      const riche = G.nations.filter(x => x.vivante && x.id !== nid)
+        .sort((a, b) => b.science - a.science)[0];
+      if (riche && riche.science > n.science * 1.2) missionEspionnage(nid, riche.id, 'volerScience');
+    }
+  }
+  for (const autre of G.nations) {
+    if (!autre.vivante || autre.id === nid) continue;
+    if (n.relations[autre.id] < -55 && !n.embargos.includes(autre.id) &&
+        !enGuerre(nid, autre.id) && Math.random() < 0.08) {
+      declarerEmbargo(nid, autre.id);
+    }
+  }
+
   // ---- 5. Mercenaires : renfort en temps de guerre ----
   if (n.guerres.length > 0 && Math.random() < 0.35) {
     const idx = G.mercenaires.findIndex(c => c.cout * 1.5 < n.or);
@@ -158,6 +178,8 @@ function iaConstruire(nid, perso, miennes) {
       if (type === 'ecole') poids *= 1 + perso.science;
       if (type === 'fort') poids *= 0.5 + perso.agression;
       if (type === 'mine_fer') poids *= 1 + perso.agression;         // l'industrie de guerre
+      if (type === 'forge') poids = n.marchandises.fer >= 15 ? 2 + perso.agression * 2 : 0.3;
+      if (type === 'atelier_luxe') poids = n.marchandises.epices >= 15 ? 2 + perso.commerce * 2 : 0.3;
       options.push({ type, poids });
     }
     if (!options.length) continue;

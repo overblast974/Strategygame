@@ -99,6 +99,7 @@ function genererCarte() {
         gisements: [],
         pop: 0,
         focus: 'equilibre',
+        usureFort: 0,
         capitale: false,
         citeEtat: false,
       });
@@ -213,6 +214,13 @@ function vivreDynastie(nid, annees) {
   if (!n.dirigeant) return;
   n.dirigeant.age += annees;
   for (const h of n.heritiers) h.age += annees;
+  if (n.general) {
+    n.general.age += annees;
+    if (Math.random() < Math.max(0, (n.general.age - 55) * 0.012) * (annees / 10 + 0.4)) {
+      journal(`⚰️ Le vieux général ${n.general.nom} de ${n.nom} s'éteint.`);
+      n.general = null;
+    }
+  }
 
   // Naissance d'un héritier
   if (n.dirigeant.age >= 18 && n.dirigeant.age <= 52 && n.heritiers.length < MAX_HERITIERS &&
@@ -251,6 +259,136 @@ function vivreDynastie(nid, annees) {
       }
     }
   }
+}
+
+// ---------- Espionnage ----------
+const COUT_ESPION = 120;
+const COUT_MISSION = 40;
+
+function recruterEspion(nid) {
+  const n = nation(nid);
+  if (n.espions >= 3) return { ok: false, raison: 'Réseau au complet (3 espions max)' };
+  if (n.or < COUT_ESPION) return { ok: false, raison: COUT_ESPION + ' 💰 requis' };
+  n.or -= COUT_ESPION;
+  n.espions++;
+  return { ok: true };
+}
+
+// Missions : volerScience, saboter, fomenter, assassiner
+function missionEspionnage(a, b, mission) {
+  const n = nation(a), cible = nation(b);
+  if (n.espions < 1) return { ok: false, raison: 'Aucun espion disponible (recrutez-en)' };
+  if (n.or < COUT_MISSION) return { ok: false, raison: COUT_MISSION + ' 💰 requis' };
+  n.or -= COUT_MISSION;
+  const chances = { volerScience: 0.65, saboter: 0.6, fomenter: 0.5, assassiner: 0.4 };
+  if (Math.random() > chances[mission]) {
+    // Échec : l'espion est démasqué
+    n.espions--;
+    modifierRelation(a, b, mission === 'assassiner' ? -30 : -15);
+    journal(`🕵️ Un espion de ${n.nom} est démasqué chez ${cible.nom} !`);
+    if (mission === 'assassiner' && !cible.joueur && Math.random() < 0.25) {
+      declarerGuerre(b, a);
+      return { ok: false, raison: `Votre assassin est pris ! ${cible.nom} répond par la guerre !` };
+    }
+    return { ok: false, raison: 'Mission échouée : votre espion est démasqué et exécuté.' };
+  }
+  switch (mission) {
+    case 'volerScience': {
+      const vol = Math.min(120, Math.max(40, Math.floor(cible.science * 0.04)));
+      n.science += vol;
+      journal(`🕵️ ${n.nom} dérobe des secrets scientifiques à ${cible.nom} (+${vol} 🔬).`);
+      return { ok: true, resultat: `+${vol} 🔬 volés !` };
+    }
+    case 'saboter': {
+      const cibles = provincesDe(b).filter(p => p.batiments.port > 0 || p.batiments.fort > 0);
+      if (!cibles.length) return { ok: true, resultat: 'Rien à saboter chez eux…' };
+      const p = pick(cibles);
+      const bat = p.batiments.port > 0 ? 'port' : 'fort';
+      p.batiments[bat]--;
+      journal(`💥 Sabotage ! ${bat === 'port' ? 'Le port' : 'La forteresse'} de ${p.nom} (${cible.nom}) part en flammes.`);
+      return { ok: true, resultat: `${bat === 'port' ? 'Port' : 'Forteresse'} de ${p.nom} saboté(e) !` };
+    }
+    case 'fomenter': {
+      const cibles = provincesDe(b).filter(p => !p.capitale);
+      if (!cibles.length) return { ok: true, resultat: 'Aucune province à soulever.' };
+      const p = pick(cibles);
+      p.proprietaire = -1;
+      p.armee = { inf: 5 + rand(4), choc: 0, siege: 0 };
+      majTroupes(p);
+      cible.stabilite = clamp(cible.stabilite - 8, 0, 100);
+      journal(`🔥 Révolte fomentée : ${p.nom} fait sécession de ${cible.nom} !`);
+      verifierElimination(b);
+      return { ok: true, resultat: `${p.nom} s'est soulevée contre eux !` };
+    }
+    case 'assassiner': {
+      if (!cible.heritiers.length) return { ok: true, resultat: 'Aucun héritier à éliminer…' };
+      const h = cible.heritiers.splice(rand(cible.heritiers.length), 1)[0];
+      journal(`🗡️ ${h.nom}, héritier de ${cible.nom}, meurt dans des circonstances… troubles.`);
+      return { ok: true, resultat: `${h.nom} a été éliminé discrètement.` };
+    }
+  }
+  return { ok: false };
+}
+
+// ---------- Factions internes ----------
+function bougerFaction(nid, faction, delta) {
+  const n = nation(nid);
+  if (!n.factions) return;
+  n.factions[faction] = clamp(n.factions[faction] + delta, 0, 100);
+}
+
+// Vérifie la colère des factions (appelé chaque tour)
+function verifierFactions(nid) {
+  const n = nation(nid);
+  if (!n.factions) return null;
+  // Dérive douce vers 50
+  for (const f of Object.keys(n.factions)) {
+    if (n.factions[f] > 50) n.factions[f]--;
+    else if (n.factions[f] < 50) n.factions[f]++;
+  }
+  for (const [f, valeur] of Object.entries(n.factions)) {
+    if (valeur <= 12) {
+      // Révolte organisée !
+      n.factions[f] = 42;
+      const rebelles = provincesDe(nid).filter(p => !p.capitale);
+      const nb = Math.min(2, rebelles.length);
+      for (let i = 0; i < nb; i++) {
+        const p = rebelles.splice(rand(rebelles.length), 1)[0];
+        p.proprietaire = -1;
+        p.armee = { inf: 6 + rand(5), choc: 2, siege: 0 };
+        majTroupes(p);
+      }
+      n.stabilite = clamp(n.stabilite - 10, 0, 100);
+      const noms = { nobles: 'La noblesse', marchands: 'Les guildes marchandes', peuple: 'Le peuple' };
+      journal(`⚔️🔥 ${noms[f]} de ${n.nom} se soulève ! ${nb} provinces rejoignent la rébellion.`);
+      verifierElimination(nid);
+      return f;
+    }
+  }
+  return null;
+}
+
+// ---------- Généraux ----------
+// Nommer un héritier général (il renonce au trône) ou recruter un inconnu (150 or)
+function nommerGeneral(nid, indexHeritier = -1) {
+  const n = nation(nid);
+  if (indexHeritier >= 0) {
+    const h = n.heritiers[indexHeritier];
+    if (!h) return { ok: false };
+    if (h.age < AGE_MAJORITE) return { ok: false, raison: 'Trop jeune pour commander (16 ans requis)' };
+    n.heritiers.splice(indexHeritier, 1);
+    n.general = h;
+    n.general.victoires = 0;
+    journal(`⚔️ ${h.nom} de ${n.nom} renonce au trône et prend la tête des armées.`);
+  } else {
+    if (n.or < 150) return { ok: false, raison: '150 💰 requis' };
+    n.or -= 150;
+    n.general = creerPersonnage(nid, 28 + rand(15));
+    n.general.martial = Math.max(n.general.martial, 5 + rand(5)); // un soldat de métier
+    n.general.victoires = 0;
+    journal(`⚔️ ${n.nom} engage le général ${n.general.nom}.`);
+  }
+  return { ok: true };
 }
 
 // Mariage royal entre deux dynasties : grande amitié durable
@@ -426,6 +564,7 @@ function genererCarteTerre() {
         gisements: [],
         pop: 0,
         focus: 'equilibre',
+        usureFort: 0,
         capitale: false,
         citeEtat: false,
       });
@@ -588,10 +727,16 @@ function nouvellePartie(nationJoueur, mode = 'terre') {
     pactes: [],
     guerres: [],
     accords: [],            // accords commerciaux
-    marchandises: { bois: 30, fer: 20, pierre: 20, epices: 10 },
+    marchandises: { bois: 30, fer: 20, pierre: 20, epices: 10, armes: 0, luxe: 0 },
     flotte: 0,
+    dette: 0,
+    embargos: [],
+    general: null,
+    debutGuerres: {},
     doctrine: null,
     doctrineTour: -99,
+    espions: 0,
+    factions: { nobles: 50, marchands: 50, peuple: 50 },
   }));
 
   const provinces = mode === 'terre' ? genererCarteTerre() : genererCarte();
@@ -750,16 +895,22 @@ function revenus(nid) {
   let commerce = 0;
   let routesMaritimes = 0;
   const mesPorts = nbPorts(nid);
+  let caravanes = 0;
   for (const pid of n.accords) {
-    if (!nation(pid).vivante) continue;
+    if (!nation(pid).vivante || aEmbargo(nid, pid)) continue;
     commerce += 8;
     if (mesPorts > 0 && nbPorts(pid) > 0 && !bloque) { commerce += 5; routesMaritimes++; }
+    if (frontalieres(nid, pid)) { commerce += 5; caravanes++; } // route caravanière terrestre
   }
+  // Intérêts de la dette
+  const interets = Math.ceil(n.dette * TAUX_INTERET);
   const mult = n.stabilite >= 50 ? 1 : 0.7; // instabilité = pertes
   return {
-    or: Math.floor((or_ - entretien + tribut + commerce - verse) * mult),
+    or: Math.floor((or_ - entretien + tribut + commerce - verse) * mult) - interets,
     commerce,
     routesMaritimes,
+    caravanes,
+    interets,
     nourriture: Math.floor((nour - Math.ceil(troupes / 3)) * mult),
     science: Math.floor(sci * mult),
     entretien,
@@ -791,13 +942,14 @@ function simulerBataille(source, cible, amphibie = false, essais = 300) {
   let multAtt = amphibie ? 0.85 : 1;
   if (att.doctrine === 'militariste') multAtt *= 1.1;
   if (att.dirigeant) multAtt *= 1 + att.dirigeant.martial * 0.015;
+  if (att.general) multAtt *= 1 + att.general.martial * 0.02;
   // Composition engagée (copie, une garnison reste)
   const engages = { ...s.armee };
   retirerComposition(engages, 1); // approximation : la garnison est retirée du plus nombreux
   const nbEngages = totalArmee(engages);
   const ereDef = c.proprietaire >= 0 ? nation(c.proprietaire).ere : 0;
   const reducSiege = Math.max(0.35, 1 - engages.siege * 0.12);
-  const bonusFort = 1 + c.batiments.fort * BATIMENTS.fort.bonus * reducSiege;
+  const bonusFort = 1 + c.batiments.fort * BATIMENTS.fort.bonus * reducSiege * (1 - (c.usureFort || 0));
   const bonusTerrain = TERRAINS[c.terrain].defense;
   const baseAtt = forceAttaque(engages, att.ere) * multAtt;
   const baseDef = Math.max(1, forceDefense(c.armee, ereDef)) * bonusFort * bonusTerrain;
@@ -907,6 +1059,82 @@ function productionMarchandises(nid) {
   return prod;
 }
 
+// Chaînes de production : les forges et ateliers transforment le brut en manufacturé
+function transformerBiens(nid, appliquer = true) {
+  const n = nation(nid);
+  const resultat = { armes: 0, luxe: 0 };
+  for (const [bat, t] of Object.entries(TRANSFORMATIONS)) {
+    let niveaux = 0;
+    for (const p of provincesDe(nid)) niveaux += p.batiments[bat];
+    if (!niveaux) continue;
+    const consommable = Math.min(n.marchandises[t.source], niveaux * t.consomme);
+    const produits = Math.floor(consommable / t.consomme) * t.produit_qte;
+    if (produits > 0 && appliquer) {
+      n.marchandises[t.source] -= produits * t.consomme;
+      n.marchandises[t.produit] += produits;
+    }
+    resultat[t.produit] += produits;
+  }
+  return resultat;
+}
+
+// Besoins de la population : le luxe rend le peuple heureux
+function consommerLuxe(nid) {
+  const n = nation(nid);
+  const pop = provincesDe(nid).reduce((s, p) => s + p.pop, 0);
+  const demande = Math.ceil(pop / LUXE_PAR_POP);
+  const consomme = Math.min(demande, Math.floor(n.marchandises.luxe));
+  n.marchandises.luxe -= consomme;
+  const satisfaction = demande > 0 ? consomme / demande : 0;
+  if (satisfaction >= 0.99) n.stabilite = clamp(n.stabilite + 2, 0, 100);
+  else if (satisfaction >= 0.5) n.stabilite = clamp(n.stabilite + 1, 0, 100);
+  return { demande, consomme, satisfaction };
+}
+
+// ---------- Prêts ----------
+function emprunter(nid, montant) {
+  const n = nation(nid);
+  if (n.dette + montant > DETTE_MAX) return { ok: false, raison: `Dette maximale atteinte (${DETTE_MAX} 💰)` };
+  n.or += montant;
+  n.dette += montant;
+  journal(`🏦 ${n.nom} emprunte ${montant} 💰 aux banquiers (dette : ${n.dette}).`);
+  return { ok: true };
+}
+
+function rembourser(nid, montant) {
+  const n = nation(nid);
+  montant = Math.min(montant, n.dette, Math.floor(n.or));
+  if (montant <= 0) return { ok: false, raison: 'Rien à rembourser (ou trésor vide)' };
+  n.or -= montant;
+  n.dette -= montant;
+  return { ok: true, montant };
+}
+
+// ---------- Embargo ----------
+function aEmbargo(a, b) { return nation(a).embargos.includes(b) || nation(b).embargos.includes(a); }
+
+function declarerEmbargo(a, b) {
+  const na = nation(a), nb = nation(b);
+  if (na.embargos.includes(b)) return { ok: false };
+  na.embargos.push(b);
+  bougerFaction(a, 'marchands', -10);
+  // L'embargo rompt l'accord commercial
+  na.accords = na.accords.filter(x => x !== b);
+  nb.accords = nb.accords.filter(x => x !== a);
+  modifierRelation(a, b, -15);
+  journal(`🚫 ${na.nom} décrète un embargo contre ${nb.nom} !`);
+  return { ok: true };
+}
+
+function leverEmbargo(a, b) {
+  const na = nation(a);
+  if (!na.embargos.includes(b)) return { ok: false };
+  na.embargos = na.embargos.filter(x => x !== b);
+  modifierRelation(a, b, 8);
+  journal(`🕊️ ${na.nom} lève son embargo contre ${nation(b).nom}.`);
+  return { ok: true };
+}
+
 function prixAchat(bien) { return Math.ceil(G.marche[bien].prix * 1.1); }
 function prixVente(bien) { return Math.max(1, Math.floor(G.marche[bien].prix * 0.9)); }
 
@@ -993,6 +1221,7 @@ function acheterRessourceNation(a, b, bien) {
   const QTE = 20;
   const vendeur = nation(b);
   if (enGuerre(a, b)) return { ok: false, raison: 'Impossible en temps de guerre' };
+  if (aEmbargo(a, b)) return { ok: false, raison: 'Un embargo vous sépare' };
   if (!nationsEnContact(a, b)) return { ok: false, raison: RAISON_CONTACT };
   if (vendeur.marchandises[bien] < QTE + 20) {
     return { ok: false, raison: `${vendeur.nom} n'a pas assez de ${MARCHANDISES[bien].nom.toLowerCase()} en surplus.` };
@@ -1041,6 +1270,7 @@ function organiserFetes(nid) {
   }
   n.marchandises.epices -= COUT_FETES_EPICES;
   n.stabilite = clamp(n.stabilite + 10, 0, 100);
+  bougerFaction(nid, 'peuple', 10);
   if (n.joueur) journal(`🎉 Grandes fêtes dans tout le royaume ! (+10 stabilité)`);
   return { ok: true };
 }
@@ -1065,12 +1295,13 @@ function resoudreAttaque(source, cible, multAtt = 1) {
   const att = nation(s.proprietaire);
   if (att.doctrine === 'militariste') multAtt *= 1.1;
   if (att.dirigeant) multAtt *= 1 + att.dirigeant.martial * 0.015; // génie militaire du souverain
+  if (att.general) multAtt *= 1 + att.general.martial * 0.02;      // et celui du général
   const engages = extraireArmee(s, s.troupes - 1); // une garnison reste
   const nbEngages = totalArmee(engages);
   const ereDef = c.proprietaire >= 0 ? nation(c.proprietaire).ere : 0;
   // Les armes de siège neutralisent une partie des fortifications
   const reducSiege = Math.max(0.35, 1 - engages.siege * 0.12);
-  const bonusFort = 1 + c.batiments.fort * BATIMENTS.fort.bonus * reducSiege;
+  const bonusFort = 1 + c.batiments.fort * BATIMENTS.fort.bonus * reducSiege * (1 - (c.usureFort || 0));
   const bonusTerrain = TERRAINS[c.terrain].defense;
   const forceAtt = forceAttaque(engages, att.ere) * multAtt * randF(0.85, 1.2);
   const forceDef = Math.max(1, forceDefense(c.armee, ereDef)) * bonusFort * bonusTerrain * randF(0.85, 1.2);
@@ -1104,6 +1335,15 @@ function resoudreAttaque(source, cible, multAtt = 1) {
     } else {
       journal(`⚔️ ${att.nom} soumet la province indépendante de ${nomCible}.`);
     }
+    if (att.general) {
+      att.general.victoires = (att.general.victoires || 0) + 1;
+      if (att.general.victoires === 6 && att.joueur) {
+        G.message = {
+          titre: '🏛️ Le triomphe du général',
+          texte: `${att.general.nom} enchaîne les victoires : le peuple scande son nom dans les rues et certains le verraient bien sur le trône… Sa gloire renforce vos armées, mais surveillez son ambition.`,
+        };
+      }
+    }
     return { ok: true, victoire: true, pertes: pertesAtt };
   } else {
     // Défaite : lourdes pertes, les survivants rentrent
@@ -1112,7 +1352,20 @@ function resoudreAttaque(source, cible, multAtt = 1) {
     retirerComposition(engages, pertesAtt);
     ajouterArmee(s, engages);
     if (c.troupes - pertesDef >= 1) retirerUnites(c, pertesDef);
-    journal(`🛡️ ${nomCible} repousse l'assaut de ${att.nom}.`);
+    // Le siège use les fortifications de la cible
+    if (c.batiments.fort > 0) {
+      c.usureFort = Math.min(0.75, (c.usureFort || 0) + 0.25);
+      if (c.pop > 2) c.pop--;
+      journal(`🛡️ ${nomCible} repousse l'assaut de ${att.nom}, mais ses murailles s'effritent (−${Math.round(c.usureFort * 100)} %).`);
+    } else {
+      journal(`🛡️ ${nomCible} repousse l'assaut de ${att.nom}.`);
+    }
+    // Le général peut tomber au champ d'honneur
+    if (att.general && Math.random() < 0.12) {
+      journal(`⚰️ Le général ${att.general.nom} de ${att.nom} tombe au combat !`);
+      if (att.joueur) G.message = { titre: '⚰️ Mort au champ d\'honneur', texte: `Le général ${att.general.nom} est tombé lors de l'assaut de ${nomCible}. Ses hommes pleurent leur chef.` };
+      att.general = null;
+    }
     return { ok: true, victoire: false, pertes: pertesAtt };
   }
 }
@@ -1172,6 +1425,16 @@ function modifierRelation(a, b, delta) {
   nation(b).relations[a] = clamp(nation(b).relations[a] + delta, -100, 100);
 }
 
+// Frontière terrestre commune ?
+function frontalieres(a, b) {
+  for (const p of provincesDe(a)) {
+    for (const vid of voisinsHex(p.col, p.row)) {
+      if (G.provinces[vid].proprietaire === b) return true;
+    }
+  }
+  return false;
+}
+
 // Deux nations sont-elles en contact ? (frontière commune, ou mer ouverte des deux côtés)
 function nationsEnContact(a, b) {
   if (nbPorts(a) > 0 && nbPorts(b) > 0) return true;
@@ -1194,6 +1457,10 @@ function declarerGuerre(a, b) {
   if (estVassal(b, a) || estVassal(a, b)) return { ok: false, raison: 'Lien de vassalité' };
   nation(a).guerres.push(b);
   nation(b).guerres.push(a);
+  if (!nation(a).debutGuerres) nation(a).debutGuerres = {};
+  if (!nation(b).debutGuerres) nation(b).debutGuerres = {};
+  nation(a).debutGuerres[b] = G.tour;
+  nation(b).debutGuerres[a] = G.tour;
   // La guerre rompt tout accord commercial
   if (aAccord(a, b)) {
     nation(a).accords = nation(a).accords.filter(x => x !== b);
@@ -1202,6 +1469,8 @@ function declarerGuerre(a, b) {
   }
   modifierRelation(a, b, -40);
   nation(a).stabilite -= 5;
+  bougerFaction(a, 'nobles', 8);     // la noblesse aime la gloire
+  bougerFaction(a, 'marchands', -8); // les marchands détestent la guerre
   journal(`⚡ ${nation(a).nom} déclare la guerre à ${nation(b).nom} !`);
   // Les alliés du défenseur rejoignent la guerre
   for (const allie of [...nation(b).alliances]) {
@@ -1225,7 +1494,8 @@ function proposerPaix(a, b, orOffert = 0) {
   if (!cible.joueur) {
     // Volonté de paix de l'IA : dépend du rapport de force
     const ratio = puissanceMilitaire(b) / Math.max(1, puissanceMilitaire(a));
-    const volonte = (1 - ratio) * 50 + orOffert / 5 + (cible.stabilite < 40 ? 20 : 0);
+    const duree = G.tour - ((cible.debutGuerres || {})[a] || G.tour);
+    const volonte = (1 - ratio) * 50 + orOffert / 5 + (cible.stabilite < 40 ? 20 : 0) + Math.min(20, duree);
     if (volonte < 10 && ratio > 1.3) return { ok: false, raison: `${cible.nom} sent la victoire proche et refuse.` };
     if (volonte < 0) return { ok: false, raison: `${cible.nom} refuse votre offre.` };
   }
@@ -1237,6 +1507,10 @@ function proposerPaix(a, b, orOffert = 0) {
 function faireLaPaix(a, b) {
   nation(a).guerres = nation(a).guerres.filter(x => x !== b);
   nation(b).guerres = nation(b).guerres.filter(x => x !== a);
+  if (nation(a).debutGuerres) delete nation(a).debutGuerres[b];
+  if (nation(b).debutGuerres) delete nation(b).debutGuerres[a];
+  bougerFaction(a, 'marchands', 6);
+  bougerFaction(b, 'marchands', 6);
   modifierRelation(a, b, 20);
   journal(`🕊️ Paix conclue entre ${nation(a).nom} et ${nation(b).nom}.`);
 }
@@ -1288,6 +1562,7 @@ function aAccord(a, b) { return nation(a).accords.includes(b); }
 function proposerAccordCommercial(a, b) {
   if (aAccord(a, b)) return { ok: false };
   if (enGuerre(a, b)) return { ok: false, raison: 'Impossible en temps de guerre' };
+  if (aEmbargo(a, b)) return { ok: false, raison: 'Un embargo vous sépare — levez-le d\'abord' };
   if (!nationsEnContact(a, b)) return { ok: false, raison: RAISON_CONTACT };
   const cible = nation(b);
   if (!cible.joueur) {
@@ -1300,6 +1575,8 @@ function proposerAccordCommercial(a, b) {
   nation(a).accords.push(b);
   nation(b).accords.push(a);
   modifierRelation(a, b, 12);
+  bougerFaction(a, 'marchands', 7);
+  bougerFaction(b, 'marchands', 7);
   journal(`💱 Accord commercial entre ${nation(a).nom} et ${nation(b).nom} (+8 💰/tour chacun).`);
   return { ok: true };
 }
@@ -1410,7 +1687,13 @@ function finDeTour() {
     n.science += Math.max(0, rev.science);
     // Production de marchandises
     const prod = productionMarchandises(n.id);
-    for (const bien of Object.keys(MARCHANDISES)) n.marchandises[bien] += prod[bien];
+    for (const bien of Object.keys(MARCHANDISES)) n.marchandises[bien] += prod[bien] || 0;
+    // Chaînes de production : forges et ateliers transforment le brut
+    transformerBiens(n.id);
+    // Le peuple consomme des biens de luxe (stabilité)
+    consommerLuxe(n.id);
+    // Dette écrasante : le peuple gronde
+    if (n.dette >= DETTE_MAX * 0.8) n.stabilite = clamp(n.stabilite - 2, 0, 100);
     // Famine : le peuple meurt, les soldats désertent
     if (n.nourriture < 0) {
       n.nourriture = 0;
@@ -1427,9 +1710,21 @@ function finDeTour() {
         if (p.pop < capaciteProvince(p) && Math.random() < tauxCroissance) p.pop++;
       }
     }
-    // Stabilité se régénère lentement en paix
-    if (n.guerres.length === 0) n.stabilite = clamp(n.stabilite + 2, 0, 100);
-    else n.stabilite = clamp(n.stabilite - 1, 0, 100);
+    // Stabilité se régénère lentement en paix ; les guerres longues épuisent le peuple
+    if (n.guerres.length === 0) {
+      n.stabilite = clamp(n.stabilite + 2, 0, 100);
+    } else {
+      let lassitude = 1;
+      for (const gid of n.guerres) {
+        const debut = (n.debutGuerres || {})[gid];
+        if (debut !== undefined && G.tour - debut > 8) lassitude++;
+      }
+      n.stabilite = clamp(n.stabilite - Math.min(3, lassitude), 0, 100);
+    }
+    // Les murailles assiégées se réparent lentement
+    for (const p of provincesDe(n.id)) {
+      if (p.usureFort > 0) p.usureFort = Math.max(0, p.usureFort - 0.15);
+    }
     // Révolte si stabilité nulle
     if (n.stabilite <= 5 && Math.random() < 0.3) {
       const miennes = provincesDe(n.id).filter(p => !p.capitale);
@@ -1477,6 +1772,15 @@ function finDeTour() {
     // Marche aléatoire + rappel vers le prix de base
     m.prix = clamp(m.prix * randF(0.95, 1.05) + (MARCHANDISES[bien].prixBase - m.prix) * 0.05, PRIX_MIN, PRIX_MAX);
   }
+  // Événements de marché : pénuries et surabondances secouent les cours
+  if (Math.random() < 0.07) {
+    const bien = pick(Object.keys(MARCHANDISES));
+    const penurie = Math.random() < 0.5;
+    G.marche[bien].prix = clamp(G.marche[bien].prix * (penurie ? 1.7 : 0.55), PRIX_MIN, PRIX_MAX);
+    journal(penurie
+      ? `📈 Pénurie mondiale de ${MARCHANDISES[bien].nom.toLowerCase()} ! Les cours s'envolent (${G.marche[bien].prix.toFixed(1)} 💰).`
+      : `📉 Surabondance de ${MARCHANDISES[bien].nom.toLowerCase()} : les cours s'effondrent (${G.marche[bien].prix.toFixed(1)} 💰).`);
+  }
 
   // Batailles navales : les flottes en guerre s'affrontent en mer
   for (const a of G.nations) {
@@ -1503,6 +1807,22 @@ function finDeTour() {
   for (const n of G.nations) {
     if (n.vivante) vivreDynastie(n.id, anneesTour);
   }
+
+  // Les factions internes s'agitent
+  for (const n of G.nations) {
+    if (!n.vivante) continue;
+    const revolte = verifierFactions(n.id);
+    if (revolte && n.joueur) {
+      const noms = { nobles: 'La noblesse', marchands: 'Les guildes', peuple: 'Le peuple' };
+      G.message = {
+        titre: '⚔️🔥 Rébellion !',
+        texte: `${noms[revolte]} s'est soulevé contre votre règne ! Des provinces ont fait sécession — reprenez-les par la force, et surveillez mieux vos factions (écran Empire).`,
+      };
+    }
+  }
+
+  // Événements historiques (mode Terre)
+  if (G.mode === 'terre') declencherEvenementsHistoriques();
 
   // 5. Réinitialiser les mouvements
   for (const p of G.provinces) p.aBouge = false;
@@ -1555,6 +1875,169 @@ function verifierVictoire() {
     }
   }
   return null;
+}
+
+// ---------- Événements historiques (mode Terre) ----------
+function declencherEvenementsHistoriques() {
+  if (!G.historique) G.historique = {};
+  const H = G.historique;
+
+  // ~1100 : l'appel à la croisade
+  if (!H.croisade && G.annee >= 1096) {
+    H.croisade = true;
+    journal('✝️ L\'appel à la croisade résonne dans toute la chrétienté !');
+    if (nation(G.joueur).vivante) {
+      G.message = {
+        titre: '✝️ L\'appel à la croisade',
+        texte: 'Un grand élan religieux soulève les royaumes. Les cours frémissent, les chevaliers affluent : +6 piquiers dans votre capitale, mais les tensions montent entre les puissances.',
+      };
+      const cap = provincesDe(G.joueur).find(p => p.capitale);
+      if (cap) { cap.armee.inf += 6; majTroupes(cap); }
+    }
+  }
+
+  // ~1206 : la horde mongole déferle
+  if (!H.mongols && G.annee >= 1206) {
+    H.mongols = true;
+    invasionMongole();
+  }
+
+  // La mort de Gengis Khan fracture son empire (comme dans l'Histoire)
+  if (H.mongols && !H.fragmentation) {
+    const horde = G.nations.find(n => n.nom === 'Horde mongole');
+    if (horde && horde.vivante && horde.dirigeant && horde.dirigeant.nom !== 'Gengis Khan') {
+      H.fragmentation = true;
+      const provs = provincesDe(horde.id).filter(p => !p.capitale);
+      const nb = Math.floor(provs.length * 0.45);
+      for (let i = 0; i < nb && provs.length; i++) {
+        const p = provs.splice(rand(provs.length), 1)[0];
+        p.proprietaire = -1;
+        p.armee = { inf: 3 + rand(3), choc: 2 + rand(3), siege: 0 };
+        majTroupes(p);
+      }
+      horde.stabilite = clamp(horde.stabilite - 30, 0, 100);
+      journal(`⚱️ Gengis Khan est mort ! Son empire se déchire : ${nb} provinces font sécession dans les querelles de succession.`);
+      if (nation(G.joueur).vivante) {
+        G.message = {
+          titre: '⚱️ La mort du Khan',
+          texte: `Gengis Khan n'est plus. Ses fils se disputent l'empire : la horde se fragmente (${nb} provinces perdues) — l'heure de la reconquête a sonné !`,
+        };
+      }
+      verifierElimination(horde.id);
+    }
+  }
+
+  // ~1347 : la peste noire
+  if (!H.peste && G.annee >= 1347) {
+    H.peste = true;
+    for (const p of G.provinces) {
+      if (p.terrain === 'eau' || p.pop <= 2) continue;
+      p.pop = Math.max(2, Math.round(p.pop * 0.7));
+    }
+    for (const n of G.nations) {
+      if (n.vivante) n.stabilite = clamp(n.stabilite - 10, 0, 100);
+    }
+    journal('☠️ LA PESTE NOIRE ravage le monde ! Un tiers de la population périt.');
+    G.message = {
+      titre: '☠️ La Peste noire',
+      texte: 'Venue des routes commerciales, la Grande Peste ravage le monde connu : −30 % de population partout, la stabilité vacille. Les survivants rebâtiront…',
+    };
+  }
+
+  // ~1492 : le Nouveau Monde
+  if (!H.ameriques && G.annee >= 1492) {
+    H.ameriques = true;
+    for (const n of G.nations) {
+      if (n.vivante && nbPorts(n.id) > 0) { n.or += 250; n.science += 100; }
+    }
+    journal('🌎 Les routes du Nouveau Monde s\'ouvrent : les puissances maritimes prospèrent (+250 💰, +100 🔬).');
+    if (nbPorts(G.joueur) > 0) {
+      G.message = {
+        titre: '🌎 Le Nouveau Monde',
+        texte: 'Vos navigateurs rapportent des terres inconnues au-delà de l\'océan ! Vos ports débordent de richesses : +250 💰 et +100 🔬.',
+      };
+    }
+  }
+}
+
+// La horde mongole : une 13e nation agressive surgit des steppes
+function invasionMongole() {
+  const id = G.nations.length;
+  const horde = {
+    id,
+    nom: 'Horde mongole',
+    couleur: '#7b241c',
+    perso: 'conquerant',
+    joueur: false,
+    vivante: true,
+    or: 400,
+    nourriture: 400,
+    science: 0,
+    stabilite: 85,
+    ere: Math.max(0, nation(G.joueur).ere - 1),
+    ascension: 0,
+    ascensionActive: false,
+    vassalDe: -1,
+    relations: G.nations.map(() => -70).concat([100]),
+    alliances: [],
+    pactes: [],
+    guerres: [],
+    accords: [],
+    marchandises: { bois: 40, fer: 60, pierre: 20, epices: 10, armes: 20, luxe: 0 },
+    flotte: 0,
+    doctrine: 'militariste',
+    doctrineTour: G.tour,
+    dette: 0,
+    embargos: [],
+    general: null,
+    debutGuerres: {},
+    espions: 0,
+    factions: { nobles: 60, marchands: 40, peuple: 55 },
+    numerotation: {},
+    heritiers: [],
+    mariages: [],
+  };
+  // Toutes les nations existantes découvrent la horde
+  for (const n of G.nations) n.relations.push(-70);
+  G.nations.push(horde);
+  horde.dirigeant = { nom: 'Gengis Khan', age: 44, martial: 10, diplomatie: 3, intendance: 6 };
+  horde.heritiers = [
+    { nom: 'Ögedei', age: 20, martial: 8, diplomatie: 4, intendance: 5 },
+    { nom: 'Djaghataï', age: 22, martial: 7, diplomatie: 2, intendance: 4 },
+  ];
+  // La horde surgit dans les steppes de Mongolie (les 12 terres libres
+  // les plus proches de Karakorum — une lance pointée vers le monde, pas un empire savant)
+  const zone = G.provinces.filter(p =>
+    p.terrain !== 'eau' && p.proprietaire === -1 && !p.citeEtat &&
+    p.col >= 43 && p.col <= 53 && p.row >= 6 && p.row <= 13)
+    .sort((a, b) => Math.hypot(a.col - 48, a.row - 9) - Math.hypot(b.col - 48, b.row - 9))
+    .slice(0, 12);
+  let capitale = null;
+  for (const p of zone) {
+    p.proprietaire = id;
+    p.armee = { inf: 3, choc: 7 + rand(4), siege: 1 };
+    majTroupes(p);
+    p.pop = Math.max(p.pop, 8);
+    if (!capitale) { capitale = p; }
+  }
+  if (!capitale) {
+    // Pas de terre libre dans les steppes : la horde surgit ailleurs en Asie
+    const secours = terreProche(G.provinces, 48, 9);
+    if (!secours) { G.nations.pop(); for (const n of G.nations) n.relations.pop(); return; }
+    secours.proprietaire = id;
+    secours.armee = { inf: 10, choc: 15, siege: 3 };
+    majTroupes(secours);
+    capitale = secours;
+  }
+  capitale.capitale = true;
+  capitale.nom = 'Karakorum';
+  capitale.batiments.fort = 1;
+  capitale.pop = 14;
+  journal('🐎🔥 LA HORDE MONGOLE DÉFERLE DES STEPPES ! Gengis Khan lève ses tümens — que le monde tremble.');
+  G.message = {
+    titre: '🐎 L\'invasion mongole !',
+    texte: 'Des steppes surgit une force que rien n\'arrête : Gengis Khan et sa horde ! Les cavaliers mongols détestent toutes les nations — préparez vos défenses ou détournez la tempête vers vos rivaux…',
+  };
 }
 
 // ---------- Sauvegarde ----------
@@ -1627,9 +2110,22 @@ function migrerSauvegarde() {
     if (n.doctrine === undefined) { n.doctrine = null; n.doctrineTour = -99; }
     if (!n.dirigeant) initDynastie(n.id);
     if (!n.mariages) n.mariages = [];
+    if (n.dette === undefined) n.dette = 0;
+    if (!n.embargos) n.embargos = [];
+    if (n.general === undefined) n.general = null;
+    if (!n.debutGuerres) n.debutGuerres = {};
+    if (n.espions === undefined) n.espions = 0;
+    if (!n.factions) n.factions = { nobles: 50, marchands: 50, peuple: 50 };
+    for (const bien of Object.keys(MARCHANDISES)) {
+      if (n.marchandises[bien] === undefined) n.marchandises[bien] = 0;
+    }
+  }
+  for (const bien of Object.keys(MARCHANDISES)) {
+    if (!G.marche[bien]) G.marche[bien] = { prix: MARCHANDISES[bien].prixBase };
   }
   for (const p of G.provinces) {
     if (p.focus === undefined) p.focus = 'equilibre';
+    if (p.usureFort === undefined) p.usureFort = 0;
   }
 }
 

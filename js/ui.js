@@ -614,7 +614,7 @@ function afficherPanneauProvince(pid) {
   <div class="pp-stats">
     <span>👥 ${p.pop}/${capaciteProvince(p)} habitants <small>· bras : ${rendement} %</small></span>
     <span>Gisements : ${gisements || 'aucun'}${orGisement && !p.batiments.mine_or ? ' <small>(🪙 : bâtir une mine d\'or !)</small>' : ''}</span>
-    <span>🛡️ Défense ×${(t.defense * (1 + p.batiments.fort * BATIMENTS.fort.bonus)).toFixed(1)}</span>
+    <span>🛡️ Défense ×${(t.defense * (1 + p.batiments.fort * BATIMENTS.fort.bonus * (1 - (p.usureFort || 0)))).toFixed(1)}${p.usureFort > 0 ? ` <small>(murailles −${Math.round(p.usureFort * 100)} %)</small>` : ''}</span>
     <span>⚔️ ${p.troupes} soldats (${TYPES_UNITES.inf.icone}${p.armee.inf} ${TYPES_UNITES.choc.icone}${p.armee.choc} ${TYPES_UNITES.siege.icone}${p.armee.siege})${monTour && p.aBouge ? ' · a agi' : ''}</span>
   </div>`;
 
@@ -940,7 +940,22 @@ function ouvrirDiplomatieAvec(nid) {
     boutons += `<button class="btn btn-danger" onclick="uiDiplo('tribut',${nid})">🪙 Exiger un tribut (menace)</button>`;
     if (!monVassal && moi.vassalDe === -1) boutons += `<button class="btn" onclick="uiDiplo('vassal',${nid})">👑 Exiger la vassalité</button>`;
     if (monVassal) boutons += `<button class="btn" onclick="uiDiplo('liberer',${nid})">🕊️ Libérer ce vassal</button>`;
+    if (nation(G.joueur).embargos.includes(nid)) {
+      boutons += `<button class="btn" onclick="uiDiplo('leverEmbargo',${nid})">🕊️ Lever l'embargo</button>`;
+    } else {
+      boutons += `<button class="btn btn-danger" onclick="uiDiplo('embargo',${nid})">🚫 Décréter un embargo</button>`;
+    }
     if (!allie && !pacte && !monVassal) boutons += `<button class="btn btn-danger" onclick="uiDiplo('guerre',${nid})">⚡ Déclarer la guerre</button>`;
+  }
+  // Espionnage
+  const moiN = nation(G.joueur);
+  boutons += `<div class="pp-emplacements" style="margin-top:8px">🕵️ Espionnage — ${moiN.espions} espion(s) · mission : ${COUT_MISSION} 💰</div>`;
+  if (moiN.espions < 3) boutons += `<button class="btn" onclick="uiRecruterEspion(${nid})">🕵️ Recruter un espion (${COUT_ESPION} 💰)</button>`;
+  if (moiN.espions > 0) {
+    boutons += `<button class="btn" onclick="uiMission(${nid},'volerScience')">📜 Voler la science <small>(65 %)</small></button>
+      <button class="btn" onclick="uiMission(${nid},'saboter')">💥 Saboter port/fort <small>(60 %)</small></button>
+      <button class="btn" onclick="uiMission(${nid},'fomenter')">🔥 Fomenter une révolte <small>(50 %)</small></button>
+      <button class="btn btn-danger" onclick="uiMission(${nid},'assassiner')">🗡️ Assassiner un héritier <small>(40 %)</small></button>`;
   }
 
   const contact = nationsEnContact(G.joueur, nid);
@@ -966,6 +981,10 @@ function uiDiplo(action, nid, montant = 0) {
     case 'tribut': r = exigerTribut(G.joueur, nid);
       if (r.ok) toast(`🪙 Tribut de ${r.tribut} 💰 obtenu !`);
       break;
+    case 'embargo': r = declarerEmbargo(G.joueur, nid);
+      if (r.ok) toast('🚫 Embargo décrété (les marchands grognent).');
+      break;
+    case 'leverEmbargo': r = leverEmbargo(G.joueur, nid); break;
     case 'achatRessource': r = acheterRessourceNation(G.joueur, nid, montant); break;
     case 'cadeau': r = envoyerCadeau(G.joueur, nid, montant); break;
     case 'vassal': r = demanderVassalite(G.joueur, nid); break;
@@ -996,7 +1015,13 @@ function ouvrirCommerce() {
       <button class="btn btn-mini btn-principal" onclick="uiMarche('vendre','${bien}')">Vendre 10<br><small>+${prixVente(bien) * 10}💰</small></button>
     </div>`;
   }
-  html += `</div>
+  html += `</div>`;
+  // Chaînes de production et besoins du peuple
+  const transfo = transformerBiens(G.joueur, false);
+  const pop = provincesDe(G.joueur).reduce((s, p) => s + p.pop, 0);
+  const demandeLuxe = Math.ceil(pop / LUXE_PAR_POP);
+  html += `<div class="pp-prod">🏭 Vos forges produisent <b>${transfo.armes} 🗡️/tour</b> (2 ⚒️ → 1 🗡️) · vos ateliers <b>${transfo.luxe} 💎/tour</b> (2 🌶️ → 1 💎)<br>
+    👥 Votre peuple demande <b>${demandeLuxe} 💎/tour</b> — satisfait : +2 🏛️ stabilité chaque tour</div>
     <button class="btn" style="width:100%" onclick="uiFetes()">🎉 Organiser des fêtes (${COUT_FETES_EPICES} 🌶️ → +10 🏛️ stabilité)</button>
     <h3 class="titre-section">⛵ Marine de guerre</h3>`;
   const ports = nbPorts(G.joueur);
@@ -1023,6 +1048,15 @@ function ouvrirCommerce() {
       <button class="btn btn-mini btn-principal" onclick="uiEmbaucher(${i})">Engager<br><small>${cie.cout}💰</small></button>
     </div>`;
   });
+  html += `<h3 class="titre-section">🏦 Banquiers</h3>
+    <div class="ligne-bien">
+      <div class="lb-info">
+        <b>Dette : ${moi.dette} 💰</b>
+        <small>intérêts : ${Math.ceil(moi.dette * TAUX_INTERET)} 💰/tour · plafond ${DETTE_MAX} 💰${moi.dette >= DETTE_MAX * 0.8 ? ' · ⚠️ le peuple gronde !' : ''}</small>
+      </div>
+      <button class="btn btn-mini" onclick="uiEmprunter(200)">Emprunter<br><small>+200💰</small></button>
+      <button class="btn btn-mini btn-principal" ${moi.dette ? '' : 'disabled'} onclick="uiRembourser(100)">Rembourser<br><small>−100💰</small></button>
+    </div>`;
   html += `<p style="margin-top:6px"><small>Les compagnies changent tous les ${TOURS_ROTATION_MERCENAIRES} tours. Vos rivaux peuvent aussi les engager…</small></p>
     <p style="margin-top:10px"><small>💱 Accords commerciaux : ${moi.accords.filter(a => nation(a).vivante).length}
     · ⚓ Routes maritimes : ${revenus(G.joueur).routesMaritimes || 0} (+5 💰/tour chacune, il faut un port des deux côtés)
@@ -1055,6 +1089,22 @@ function uiNavires(q) {
   ouvrirCommerce();
 }
 
+function uiEmprunter(m) {
+  const r = emprunter(G.joueur, m);
+  if (!r.ok) toast(r.raison);
+  else toast(`🏦 +${m} 💰 empruntés.`);
+  majBarre();
+  ouvrirCommerce();
+}
+
+function uiRembourser(m) {
+  const r = rembourser(G.joueur, m);
+  if (!r.ok) toast(r.raison);
+  else toast(`🏦 ${r.montant} 💰 remboursés (dette : ${nation(G.joueur).dette}).`);
+  majBarre();
+  ouvrirCommerce();
+}
+
 function uiEmbaucher(index) {
   const cie = G.mercenaires[index];
   const r = embaucherMercenaires(G.joueur, index);
@@ -1062,6 +1112,21 @@ function uiEmbaucher(index) {
   toast(`🏴 La ${cie.nom} rejoint vos rangs !`);
   majTout();
   ouvrirCommerce();
+}
+
+function uiRecruterEspion(nid) {
+  const r = recruterEspion(G.joueur);
+  if (!r.ok) toast(r.raison);
+  else toast('🕵️ Un espion rejoint votre réseau.');
+  majBarre();
+  ouvrirDiplomatieAvec(nid);
+}
+
+function uiMission(nid, mission) {
+  const r = missionEspionnage(G.joueur, nid, mission);
+  toast(r.ok ? `🕵️ ${r.resultat}` : (r.raison || 'Échec'));
+  majTout();
+  ouvrirDiplomatieAvec(nid);
 }
 
 // Sous-écran : acheter 20 unités d'un bien à une nation
@@ -1260,6 +1325,7 @@ function ouvrirResume() {
     ${ligneDetail('Versé au suzerain', -d.verse, '💰')}
     ${ligneDetail('Entretien de l\'armée (' + d.troupes + ' ⚔️)', -d.entretienArmee, '💰')}
     ${ligneDetail('Entretien de la flotte (' + moi.flotte + ' ⛵)', -d.entretienFlotte, '💰')}
+    ${ligneDetail('Intérêts de la dette (' + moi.dette + ' 💰 dus)', -(rev.interets || 0), '💰')}
     <h3 class="titre-section">🌾 Nourriture : ${rev.nourriture >= 0 ? '+' : ''}${rev.nourriture}/tour</h3>
     ${ligneDetail('Provinces et fermes', d.nourProvinces, '🌾')}
     ${ligneDetail('Doctrine agraire', d.nourBonus, '🌾')}
@@ -1276,7 +1342,19 @@ function ouvrirResume() {
       <span>${TYPES_UNITES.siege.icone} ${total.siege} ${TYPES_UNITES.siege.noms[moi.ere]}</span>
       <span>⛵ ${moi.flotte} navires</span>
     </div>
-    <p><small>👑 ${moi.dirigeant.nom} (${moi.dirigeant.age} ans) · ${moi.doctrine ? DOCTRINES[moi.doctrine].icone + ' ' + DOCTRINES[moi.doctrine].nom : 'Aucune doctrine (voir Techno)'} ·
+    <h3 class="titre-section">🏛️ Factions internes</h3>
+    ${['nobles', 'marchands', 'peuple'].map(f => {
+      const v = moi.factions[f];
+      const coul = v <= 25 ? '#e55' : v <= 40 ? '#cc5' : '#7ec97e';
+      const noms = { nobles: '⚜️ Noblesse', marchands: '⚖️ Marchands', peuple: '👥 Peuple' };
+      return `<div class="ligne-detail"><span>${noms[f]}${v <= 25 ? ' ⚠️ risque de révolte !' : ''}</span>
+        <span class="barre-prog" style="width:90px"><span class="barre-prog-int" style="width:${v}%;background:${coul};display:block;height:100%"></span></span></div>`;
+    }).join('')}
+    <p><small>La guerre plaît aux nobles mais fâche les marchands ; les fêtes et le luxe apaisent le peuple. Une faction à bout se soulève !</small></p>
+    <p><small>👑 ${moi.dirigeant.nom} (${moi.dirigeant.age} ans) ·
+    ${moi.general ? '⚔️ Général ' + moi.general.nom + ' (' + (moi.general.victoires || 0) + ' victoires)' : 'aucun général (voir Dynastie)'} ·
+    🕵️ ${moi.espions} espion(s) ·
+    ${moi.doctrine ? DOCTRINES[moi.doctrine].icone + ' ' + DOCTRINES[moi.doctrine].nom : 'aucune doctrine (voir Techno)'} ·
     ${provincesDe(G.joueur).length} provinces</small></p>
     <div class="rangee-btn"><button class="btn" onclick="fermerModale()">Fermer</button></div>`);
 }
@@ -1355,6 +1433,9 @@ function ouvrirAide() {
     ⚓ Le <b>port</b> ouvre le commerce maritime, le contact avec les nations lointaines et les invasions.<br>
     🕊️ On ne traite qu'avec les nations <b>en contact</b> (frontière ou ports des deux côtés).<br>
     💍 <b>Mariages royaux</b> et cadeaux montent les relations ; les alliés rejoignent vos guerres défensives.<br>
+    🏭 Les <b>forges</b> (2 ⚒️ → 1 🗡️) et <b>ateliers</b> (2 🌶️ → 1 💎) créent des biens 3-4× plus chers — le peuple consomme du 💎.<br>
+    ⚔️ Un <b>général</b> booste vos attaques ; les assauts répétés usent les <b>murailles</b> ennemies ; les guerres longues épuisent le peuple.<br>
+    🕵️ Les <b>espions</b> volent, sabotent, soulèvent et assassinent ; surveillez vos <b>factions</b> (écran Empire).<br>
     🏆 <b>3 victoires</b> : domination (55 % des terres), science (Ascension), diplomatie (allié avec tous).
     </small></p>
     <div class="rangee-btn"><button class="btn" onclick="fermerModale()">Fermer</button></div>`);
@@ -1370,6 +1451,14 @@ function cartePersonnage(perso, role) {
   </div>`;
 }
 
+function uiNommerGeneral(index) {
+  const r = nommerGeneral(G.joueur, index);
+  if (!r.ok) toast(r.raison || 'Impossible');
+  else toast(`⚔️ ${nation(G.joueur).general.nom} commande désormais vos armées !`);
+  majTout();
+  ouvrirDynastie();
+}
+
 function ouvrirDynastie() {
   const moi = nation(G.joueur);
   let html = `<h2>👑 Dynastie de ${moi.nom}</h2>`;
@@ -1383,6 +1472,20 @@ function ouvrirDynastie() {
   }
   for (const h of moi.heritiers) {
     html += cartePersonnage(h, h.age >= AGE_MAJORITE ? '🤴' : '👶');
+  }
+  html += `<h3 class="titre-section">⚔️ Général en chef</h3>`;
+  if (moi.general) {
+    html += cartePersonnage(moi.general, '⚔️') +
+      `<p><small>${moi.general.victoires || 0} victoires · bonus d'attaque : +${(moi.general.martial * 2).toFixed(0)} % · il peut tomber au combat…</small></p>`;
+  } else {
+    html += `<p><small>Aucun général : vos armées ne bénéficient d'aucun commandement d'élite.</small></p>
+      <div class="colonne-btn">`;
+    moi.heritiers.forEach((h, i) => {
+      if (h.age >= AGE_MAJORITE) {
+        html += `<button class="btn" onclick="uiNommerGeneral(${i})">⚔️ Nommer ${h.nom} général <small>(quitte la succession · 🗡️ ${h.martial})</small></button>`;
+      }
+    });
+    html += `<button class="btn" onclick="uiNommerGeneral(-1)">⚔️ Recruter un général de métier (150 💰)</button></div>`;
   }
   const unions = moi.mariages.filter(m => nation(m).vivante).map(m => nation(m).nom);
   html += `<h3 class="titre-section">💍 Unions royales</h3>
