@@ -606,6 +606,17 @@ function placerNationsTerre(provinces, nations) {
     cap.pop = 12;
     capitales.push(cap);
   }
+  // Provinces historiques : nommées et revendiquées à leurs coordonnées réelles
+  for (let n = 0; n < nations.length; n++) {
+    for (const [nomProv, pc, pl] of NATIONS_TERRE[n].provinces) {
+      const p = terreProche(provinces, pc, pl);
+      if (!p || Math.hypot(p.col - pc, p.row - pl) > 3) continue;
+      p.proprietaire = n;
+      p.nom = nomProv;
+      p.armee = { inf: 2 + rand(3), choc: 0, siege: 0 };
+      majTroupes(p);
+    }
+  }
   // Premier anneau garanti + expansion
   for (let n = 0; n < nations.length; n++) {
     for (const vid of voisinsHex(capitales[n].col, capitales[n].row)) {
@@ -649,16 +660,6 @@ function placerNationsTerre(provinces, nations) {
       best.armee = { inf: 2 + rand(3), choc: 0, siege: 0 };
       majTroupes(best);
       miennes = provinces.filter(p => p.proprietaire === n);
-    }
-  }
-  // Noms historiques des provinces de chaque nation (des plus proches aux plus lointaines)
-  for (let n = 0; n < nations.length; n++) {
-    const noms = [...NATIONS_TERRE[n].provinces];
-    const miennes = provinces.filter(p => p.proprietaire === n && !p.capitale)
-      .sort((a, b) => Math.hypot(a.col - capitales[n].col, a.row - capitales[n].row) -
-                      Math.hypot(b.col - capitales[n].col, b.row - capitales[n].row));
-    for (const p of miennes) {
-      if (noms.length) p.nom = noms.shift();
     }
   }
   // Cités-états historiques
@@ -2005,13 +2006,16 @@ function invasionMongole() {
     { nom: 'Ögedei', age: 20, martial: 8, diplomatie: 4, intendance: 5 },
     { nom: 'Djaghataï', age: 22, martial: 7, diplomatie: 2, intendance: 4 },
   ];
-  // La horde surgit dans les steppes de Mongolie (les 12 terres libres
-  // les plus proches de Karakorum — une lance pointée vers le monde, pas un empire savant)
+  // La horde surgit dans les steppes de Mongolie (les terres libres les plus
+  // proches de Karakorum — coordonnées proportionnelles à la taille de la grille)
+  const sx = MAP_W / 64, sy = MAP_H / 40;
+  const cKara = 48 * sx, lKara = 9 * sy;
+  const nbSpawn = Math.round(12 * sx); // une horde plus vaste sur les grandes cartes
   const zone = G.provinces.filter(p =>
     p.terrain !== 'eau' && p.proprietaire === -1 && !p.citeEtat &&
-    p.col >= 43 && p.col <= 53 && p.row >= 6 && p.row <= 13)
-    .sort((a, b) => Math.hypot(a.col - 48, a.row - 9) - Math.hypot(b.col - 48, b.row - 9))
-    .slice(0, 12);
+    p.col >= 43 * sx && p.col <= 53 * sx && p.row >= 6 * sy && p.row <= 13 * sy)
+    .sort((a, b) => Math.hypot(a.col - cKara, a.row - lKara) - Math.hypot(b.col - cKara, b.row - lKara))
+    .slice(0, nbSpawn);
   let capitale = null;
   for (const p of zone) {
     p.proprietaire = id;
@@ -2022,7 +2026,7 @@ function invasionMongole() {
   }
   if (!capitale) {
     // Pas de terre libre dans les steppes : la horde surgit ailleurs en Asie
-    const secours = terreProche(G.provinces, 48, 9);
+    const secours = terreProche(G.provinces, cKara, lKara);
     if (!secours) { G.nations.pop(); for (const n of G.nations) n.relations.pop(); return; }
     secours.proprietaire = id;
     secours.armee = { inf: 10, choc: 15, siege: 3 };
