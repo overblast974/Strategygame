@@ -467,6 +467,17 @@ function placerNationsTerre(provinces, nations) {
     cap.pop = 12;
     capitales.push(cap);
   }
+  // Provinces historiques : nommées et revendiquées à leurs coordonnées réelles
+  for (let n = 0; n < nations.length; n++) {
+    for (const [nomProv, pc, pl] of NATIONS_TERRE[n].provinces) {
+      const p = terreProche(provinces, pc, pl);
+      if (!p || Math.hypot(p.col - pc, p.row - pl) > 3) continue;
+      p.proprietaire = n;
+      p.nom = nomProv;
+      p.armee = { inf: 2 + rand(3), choc: 0, siege: 0 };
+      majTroupes(p);
+    }
+  }
   // Premier anneau garanti + expansion
   for (let n = 0; n < nations.length; n++) {
     for (const vid of voisinsHex(capitales[n].col, capitales[n].row)) {
@@ -510,16 +521,6 @@ function placerNationsTerre(provinces, nations) {
       best.armee = { inf: 2 + rand(3), choc: 0, siege: 0 };
       majTroupes(best);
       miennes = provinces.filter(p => p.proprietaire === n);
-    }
-  }
-  // Noms historiques des provinces de chaque nation (des plus proches aux plus lointaines)
-  for (let n = 0; n < nations.length; n++) {
-    const noms = [...NATIONS_TERRE[n].provinces];
-    const miennes = provinces.filter(p => p.proprietaire === n && !p.capitale)
-      .sort((a, b) => Math.hypot(a.col - capitales[n].col, a.row - capitales[n].row) -
-                      Math.hypot(b.col - capitales[n].col, b.row - capitales[n].row));
-    for (const p of miennes) {
-      if (noms.length) p.nom = noms.shift();
     }
   }
   // Cités-états historiques

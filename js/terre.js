@@ -98,51 +98,51 @@ const CODE_TERRAIN = { p: 'plaine', f: 'foret', c: 'colline', m: 'montagne', d: 
 const NATIONS_TERRE = [
   {
     nom: 'Royaume de France', couleur: '#2d5bd1', perso: 'diplomate', capitale: [64, 20], nomCapitale: 'Île-de-France',
-    provinces: ['Normandie', 'Bourgogne', 'Aquitaine', 'Champagne', 'Anjou', 'Toulouse', 'Flandre', 'Bretagne', 'Provence', 'Gascogne'],
+    provinces: [['Normandie', 64, 19], ['Bretagne', 63, 20], ['Anjou', 64, 20], ['Aquitaine', 64, 22], ['Gascogne', 64, 22], ['Toulouse', 64, 23], ['Provence', 65, 23], ['Bourgogne', 66, 20], ['Champagne', 65, 20], ['Flandre', 65, 18]],
   },
   {
     nom: 'Saint-Empire', couleur: '#c8a015', perso: 'expansionniste', capitale: [68, 18], nomCapitale: 'Saxe',
-    provinces: ['Bavière', 'Souabe', 'Franconie', 'Lorraine', 'Bohême', 'Carinthie', 'Frise', 'Thuringe', 'Lombardie', 'Autriche'],
+    provinces: [['Bavière', 68, 20], ['Souabe', 67, 20], ['Franconie', 67, 19], ['Lorraine', 65, 19], ['Bohême', 68, 19], ['Carinthie', 68, 21], ['Frise', 66, 17], ['Thuringe', 68, 18], ['Lombardie', 67, 21], ['Autriche', 70, 20]],
   },
   {
     nom: 'Royaume d\'Angleterre', couleur: '#c0392b', perso: 'opportuniste', capitale: [62, 18], nomCapitale: 'Wessex',
-    provinces: ['Mercie', 'Northumbrie', 'Est-Anglie', 'Kent', 'Cornouailles', 'Galles', 'Écosse', 'Irlande'],
+    provinces: [['Mercie', 63, 17], ['Northumbrie', 63, 17], ['Est-Anglie', 64, 17], ['Kent', 64, 18], ['Cornouailles', 62, 19], ['Galles', 62, 18], ['Écosse', 62, 15], ['Irlande', 61, 17]],
   },
   {
     nom: 'Califat de Cordoue', couleur: '#1e8449', perso: 'savant', capitale: [62, 26], nomCapitale: 'Cordoue',
-    provinces: ['Séville', 'Grenade', 'Tolède', 'Valence', 'Saragosse', 'Léon', 'Castille', 'Algarve'],
+    provinces: [['Séville', 62, 26], ['Grenade', 62, 26], ['Tolède', 62, 25], ['Valence', 63, 25], ['Saragosse', 63, 24], ['Léon', 61, 23], ['Castille', 62, 23], ['Algarve', 61, 26]],
   },
   {
     nom: 'Empire byzantin', couleur: '#7d3c98', perso: 'diplomate', capitale: [74, 24], nomCapitale: 'Constantinople',
-    provinces: ['Anatolie', 'Thrace', 'Macédoine', 'Morée', 'Chypre', 'Trébizonde', 'Épire', 'Bulgarie', 'Crète', 'Antioche'],
+    provinces: [['Anatolie', 75, 25], ['Thrace', 73, 24], ['Macédoine', 72, 24], ['Morée', 72, 26], ['Chypre', 75, 27], ['Trébizonde', 78, 24], ['Épire', 71, 25], ['Bulgarie', 72, 23], ['Crète', 72, 27], ['Antioche', 76, 27]],
   },
   {
     nom: 'Califat fatimide', couleur: '#117a65', perso: 'marchand', capitale: [74, 30], nomCapitale: 'Le Caire',
-    provinces: ['Alexandrie', 'Damas', 'Jérusalem', 'La Mecque', 'Barqa', 'Assouan', 'Kairouan', 'Tripoli'],
+    provinces: [['Alexandrie', 74, 30], ['Damas', 77, 28], ['Jérusalem', 76, 29], ['La Mecque', 77, 35], ['Barqa', 70, 29], ['Assouan', 75, 34], ['Kairouan', 67, 27], ['Tripoli', 68, 29]],
   },
   {
     nom: 'Rus\' de Kiev', couleur: '#5d6d7e', perso: 'expansionniste', capitale: [74, 20], nomCapitale: 'Kiev',
-    provinces: ['Tchernigov', 'Smolensk', 'Polotsk', 'Volhynie', 'Riazan', 'Souzdal', 'Pereïaslav', 'Galicie'],
+    provinces: [['Tchernigov', 75, 18], ['Smolensk', 75, 16], ['Polotsk', 74, 16], ['Volhynie', 73, 18], ['Riazan', 78, 16], ['Souzdal', 78, 15], ['Pereïaslav', 74, 19], ['Galicie', 72, 19]],
   },
   {
     nom: 'Empire Song', couleur: '#d35400', perso: 'savant', capitale: [104, 28], nomCapitale: 'Kaifeng',
-    provinces: ['Hebei', 'Shandong', 'Jiangnan', 'Sichuan', 'Guangdong', 'Fujian', 'Hunan', 'Shaanxi', 'Yunnan', 'Henan'],
+    provinces: [['Hebei', 105, 26], ['Shandong', 105, 27], ['Jiangnan', 106, 29], ['Sichuan', 101, 30], ['Guangdong', 104, 34], ['Fujian', 106, 33], ['Hunan', 104, 31], ['Shaanxi', 103, 28], ['Yunnan', 100, 33], ['Henan', 104, 28]],
   },
   {
     nom: 'Japon Heian', couleur: '#a83f6b', perso: 'opportuniste', capitale: [112, 28], nomCapitale: 'Yamato',
-    provinces: ['Kantō', 'Mutsu', 'Shikoku', 'Kyūshū', 'Izumo', 'Echigo', 'Owari'],
+    provinces: [['Kantō', 113, 27], ['Mutsu', 114, 26], ['Shikoku', 111, 28], ['Kyūshū', 110, 29], ['Izumo', 111, 27], ['Echigo', 113, 26], ['Owari', 112, 27]],
   },
   {
     nom: 'Empire chola', couleur: '#b3812e', perso: 'marchand', capitale: [92, 42], nomCapitale: 'Tanjore',
-    provinces: ['Pandya', 'Kerala', 'Ceylan', 'Vengi', 'Kalinga', 'Karnata', 'Andhra'],
+    provinces: [['Pandya', 92, 42], ['Kerala', 91, 42], ['Ceylan', 92, 43], ['Vengi', 93, 38], ['Kalinga', 94, 36], ['Karnata', 91, 40], ['Andhra', 92, 38]],
   },
   {
     nom: 'Empire du Ghana', couleur: '#8e6c3a', perso: 'marchand', capitale: [60, 38], nomCapitale: 'Koumbi Saleh',
-    provinces: ['Aoudaghost', 'Oualata', 'Djenné', 'Gao', 'Takrour', 'Sosso', 'Bambouk'],
+    provinces: [['Aoudaghost', 60, 37], ['Oualata', 61, 38], ['Djenné', 62, 40], ['Gao', 64, 38], ['Takrour', 58, 38], ['Sosso', 60, 41], ['Bambouk', 60, 40]],
   },
   {
     nom: 'Empire toltèque', couleur: '#b03a2e', perso: 'conquerant', capitale: [28, 36], nomCapitale: 'Tula',
-    provinces: ['Cholula', 'Tulancingo', 'Culhuacán', 'Matlatzinca', 'Huastèque', 'Mixtèque', 'Zapotèque'],
+    provinces: [['Cholula', 28, 37], ['Tulancingo', 29, 36], ['Culhuacán', 28, 36], ['Matlatzinca', 28, 36], ['Huastèque', 28, 35], ['Mixtèque', 29, 38], ['Zapotèque', 30, 38]],
   },
 ];
 
@@ -164,8 +164,10 @@ const ZONES_NOMS_TERRE = [
   { zone: [22, 45, 30, 45], noms: ['Anasazi', 'Comanche', 'Maya', 'Yucatán', 'Taïno', 'Caraïbe', 'Mixteca', 'Totonaque', 'Tarasque', 'Chichimèque'] },
   { zone: [30, 53, 42, 79], noms: ['Chimú', 'Tiwanaku', 'Moche', 'Quechua', 'Aymara', 'Mapuche', 'Guarani', 'Tupi', 'Chibcha', 'Nazca', 'Patagonie', 'Amazonie', 'Chaco'] },
   { zone: [56, 83, 4, 17], noms: ['Islande', 'Groenland', 'Laponie', 'Norvège', 'Suède', 'Danemark', 'Gotland', 'Finlande', 'Carélie', 'Estonie'] },
-  { zone: [54, 77, 16, 29], noms: ['Pologne', 'Hongrie', 'Croatie', 'Serbie', 'Valachie', 'Moldavie', 'Lituanie', 'Prusse', 'Poméranie', 'Navarre', 'Sardaigne', 'Sicile', 'Naples', 'Rome', 'Toscane'] },
-  { zone: [56, 89, 26, 39], noms: ['Fès', 'Marrakech', 'Tlemcen', 'Ifriqiya', 'Cyrénaïque', 'Nubie', 'Axoum', 'Adal', 'Hedjaz', 'Oman', 'Yémen', 'Nedjd', 'Sinaï', 'Palmyre'] },
+  { zone: [56, 66, 14, 21], noms: ['Ulster', 'Munster', 'Connacht', 'Strathclyde', 'Man', 'Orcades', 'Hébrides'] },
+  { zone: [66, 74, 21, 27], noms: ['Rome', 'Toscane', 'Naples', 'Sicile', 'Sardaigne', 'Ombrie', 'Ligurie', 'Corse'] },
+  { zone: [54, 77, 16, 29], noms: ['Pologne', 'Hongrie', 'Croatie', 'Serbie', 'Valachie', 'Moldavie', 'Lituanie', 'Prusse', 'Poméranie', 'Navarre'] },
+  { zone: [56, 89, 28, 39], noms: ['Fès', 'Marrakech', 'Tlemcen', 'Ifriqiya', 'Cyrénaïque', 'Nubie', 'Axoum', 'Adal', 'Hedjaz', 'Oman', 'Yémen', 'Nedjd', 'Sinaï', 'Palmyre'] },
   { zone: [56, 85, 38, 73], noms: ['Kanem', 'Bornou', 'Haoussa', 'Yoruba', 'Igbo', 'Kongo', 'Louba', 'Zoulou', 'Swahili', 'Madagascar', 'Zimbabwé', 'Kalahari', 'Namib', 'Le Cap'] },
   { zone: [76, 127, 4, 17], noms: ['Sibérie', 'Oural', 'Iakoutie', 'Toungouska', 'Kamtchatka', 'Bachkirie', 'Khanat bulgare', 'Petchénègues', 'Coumans', 'Khazarie'] },
   { zone: [76, 97, 16, 33], noms: ['Perse', 'Khorassan', 'Sogdiane', 'Kharezm', 'Boukhara', 'Samarcande', 'Ghazni', 'Kaboul', 'Arménie', 'Géorgie', 'Azerbaïdjan', 'Mésopotamie', 'Bagdad', 'Chiraz'] },
