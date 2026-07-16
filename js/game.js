@@ -1618,9 +1618,20 @@ function liberer(a, b) {
 }
 
 // ---------- Technologie ----------
+// Les grands mondes produisent plus de science : les seuils s'y adaptent
+function echelleScience() {
+  return clamp(Math.sqrt((MAP_W * MAP_H) / 2560), 1, 3);
+}
+function seuilEre(id) {
+  return Math.round(ERES[id].seuil * echelleScience());
+}
+function coutAscension() {
+  return Math.round(PROJET_ASCENSION.cout * echelleScience());
+}
+
 function verifierEre(nid) {
   const n = nation(nid);
-  while (n.ere < ERES.length - 1 && n.science >= ERES[n.ere + 1].seuil) {
+  while (n.ere < ERES.length - 1 && n.science >= seuilEre(n.ere + 1)) {
     n.ere++;
     journal(`${ERES[n.ere].icone} ${n.nom} entre dans l'${ERES[n.ere].nom.toLowerCase().startsWith('è') ? '' : 'ère : '}${ERES[n.ere].nom} !`);
     if (n.joueur) G.message = { titre: 'Nouvelle ère !', texte: `Votre nation entre dans l'ère « ${ERES[n.ere].nom} ». Vos unités deviennent des ${ERES[n.ere].unite} (puissance ×${ERES[n.ere].puissance}).` };
@@ -1630,8 +1641,8 @@ function verifierEre(nid) {
 function lancerAscension(nid) {
   const n = nation(nid);
   if (n.ere < 4) return { ok: false, raison: 'Ère futuriste requise' };
-  if (n.science < PROJET_ASCENSION.cout) return { ok: false, raison: `${PROJET_ASCENSION.cout} science requise` };
-  n.science -= PROJET_ASCENSION.cout;
+  if (n.science < coutAscension()) return { ok: false, raison: `${coutAscension()} science requise` };
+  n.science -= coutAscension();
   n.ascensionActive = true;
   journal(`🌌 ${n.nom} lance le projet ${PROJET_ASCENSION.nom} ! (${PROJET_ASCENSION.tours} tours)`);
   return { ok: true };

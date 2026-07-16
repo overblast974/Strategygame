@@ -1213,7 +1213,7 @@ function ouvrirTechnologie() {
     const actuelle = moi.ere === e.id;
     html += `<div class="carte-ere ${atteinte ? 'atteinte' : ''} ${actuelle ? 'actuelle' : ''}">
       <span class="ere-icone">${e.icone}</span>
-      <div><b>${e.nom}</b><small>${e.unite} · puissance ×${e.puissance}${e.seuil > 0 ? ` · ${e.seuil} 🔬` : ''}</small></div>
+      <div><b>${e.nom}</b><small>${e.unite} · puissance ×${e.puissance}${e.seuil > 0 ? ` · ${seuilEre(e.id)} 🔬` : ''}</small></div>
       ${actuelle ? '<span class="badge">ACTUELLE</span>' : atteinte ? '<span class="badge ok">✓</span>' : ''}
     </div>`;
   }
@@ -1232,7 +1232,7 @@ function ouvrirTechnologie() {
       html += `<div class="carte-ere actuelle"><span class="ere-icone">🌌</span>
         <div><b>${PROJET_ASCENSION.nom}</b><small>En cours : ${moi.ascension}/${PROJET_ASCENSION.tours} tours</small></div></div>`;
     } else {
-      html += `<button class="btn btn-principal" onclick="uiAscension()">🌌 Lancer ${PROJET_ASCENSION.nom} (${PROJET_ASCENSION.cout} 🔬)<br><small>Victoire scientifique en ${PROJET_ASCENSION.tours} tours</small></button>`;
+      html += `<button class="btn btn-principal" onclick="uiAscension()">🌌 Lancer ${PROJET_ASCENSION.nom} (${coutAscension()} 🔬)<br><small>Victoire scientifique en ${PROJET_ASCENSION.tours} tours</small></button>`;
     }
   }
   html += `<div class="rangee-btn"><button class="btn" onclick="fermerModale()">Fermer</button></div>`;
@@ -1363,9 +1363,10 @@ function ouvrirResume() {
   }
   // Progression vers la prochaine ère
   const prochaine = ERES[moi.ere + 1];
+  const seuilProchain = prochaine ? seuilEre(moi.ere + 1) : 0;
   const barre = prochaine
-    ? `<div class="barre-prog"><div class="barre-prog-int" style="width:${Math.min(100, Math.round(moi.science / prochaine.seuil * 100))}%"></div></div>
-       <p><small>${Math.floor(moi.science)} / ${prochaine.seuil} 🔬 vers « ${prochaine.nom} » (+${rev.science}/tour)</small></p>`
+    ? `<div class="barre-prog"><div class="barre-prog-int" style="width:${Math.min(100, Math.round(moi.science / seuilProchain * 100))}%"></div></div>
+       <p><small>${Math.floor(moi.science)} / ${seuilProchain} 🔬 vers « ${prochaine.nom} » (+${rev.science}/tour)</small></p>`
     : '<p><small>Ère finale atteinte — visez l\'Ascension Stellaire !</small></p>';
 
   ouvrirModale(`<h2>📊 ${moi.nom}</h2>
