@@ -48,24 +48,260 @@ button { font-family: inherit; cursor: pointer; }
               linear-gradient(180deg, #0e1c2c 0%, #16324a 50%, #0c1826 100%);
 }
 
-/* Barre du haut */
+/* ---------- Barre du haut : identité en premier, or en vedette ---------- */
 #barre-haut {
   position: absolute; top: 0; left: 0; right: 0;
-  display: flex; align-items: center; gap: 12px;
-  padding: calc(6px + env(safe-area-inset-top)) 12px 6px;
-  background: linear-gradient(180deg, #10171fee, #10171fcc);
-  backdrop-filter: blur(6px);
-  font-size: 13px; font-weight: 600;
-  overflow-x: auto; white-space: nowrap;
+  display: flex; flex-direction: column; gap: 5px;
+  padding: calc(6px + env(safe-area-inset-top)) 10px 7px;
+  background: linear-gradient(180deg, #0c1219f7 0%, #0c1219e0 70%, #0c121900 100%);
+  backdrop-filter: blur(8px);
   z-index: 5;
-  scrollbar-width: none;
 }
-#barre-haut::-webkit-scrollbar { display: none; }
-#barre-haut small { font-size: 10px; margin-left: 2px; font-weight: 400; }
-#barre-haut .pos { color: #7ec97e; }
-#barre-haut .neg { color: #e07070; }
-.bh-nation { display: inline-flex; align-items: center; gap: 6px; }
-.bh-ere { margin-left: auto; color: #ffe9a0; }
+.bh-rang1 { display: flex; align-items: center; gap: 7px; }
+.bh-rang2 { display: flex; align-items: stretch; gap: 5px; }
+
+/* Identité du royaume : la couleur du joueur borde le bloc */
+.bh-nation {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 8px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--coul) 30%, #16202c), #16202c);
+  border: 1px solid var(--coul); border-left: 4px solid var(--coul);
+  border-radius: 10px; padding: 5px 10px;
+  color: #f2ede1; text-align: left; overflow: hidden;
+}
+.bh-blason { width: 15px; height: 15px; border-radius: 50%; border: 2px solid #ffffff5c; flex-shrink: 0; }
+.bh-nom { font-size: 14px; font-weight: 700; letter-spacing: 0.2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bh-sous { font-size: 10px; color: #9db2c7; margin-left: auto; white-space: nowrap; flex-shrink: 0; }
+
+/* Ce qui doit crier : guerres en cours et alertes non lues */
+.bh-guerre {
+  background: #5e1b16; border: 1px solid #ff4433; border-radius: 10px;
+  color: #ffd9d4; font-size: 13px; font-weight: 700; padding: 6px 9px;
+  animation: pulseGuerre 2s ease-in-out infinite; flex-shrink: 0;
+}
+@keyframes pulseGuerre {
+  0%, 100% { box-shadow: 0 0 0 0 #ff443300; }
+  50% { box-shadow: 0 0 0 5px #ff443326; }
+}
+.bh-cloche {
+  position: relative; flex-shrink: 0;
+  background: #223142; border: 1px solid #3a4f66; border-radius: 10px;
+  font-size: 15px; padding: 5px 9px; color: #e8e2d5;
+}
+.bh-cloche.actif { border-color: #c9962f; background: #3a3323; }
+.bh-cloche.critique { border-color: #ff4433; background: #5e1b16; animation: pulseGuerre 1.4s ease-in-out infinite; }
+.bh-pastille {
+  position: absolute; top: -6px; right: -6px;
+  min-width: 17px; height: 17px; padding: 0 4px;
+  background: #e03e2f; color: #fff;
+  border: 1.5px solid #0c1219; border-radius: 9px;
+  font-size: 10px; font-weight: 700; line-height: 14px;
+}
+
+/* Jauges de ressources : l'or domine, le reste s'efface */
+.bh-jauge {
+  flex: 1; min-width: 0;
+  display: flex; align-items: baseline; justify-content: center; gap: 4px;
+  background: #16202ccc; border: 1px solid #2e3f52; border-radius: 9px;
+  padding: 5px 6px; color: #e8e2d5;
+}
+.bhj-icone { font-size: 13px; }
+.bhj-val { font-size: 15px; font-weight: 700; }
+.bhj-delta { font-size: 11px; font-weight: 700; }
+.bh-jauge.or {
+  flex: 1.45;
+  background: linear-gradient(180deg, #2a2313, #1c1a10);
+  border-color: #8a6a22;
+}
+.bh-jauge.or .bhj-val { font-size: 18px; color: #ffe9a0; }
+.bh-jauge.or .bhj-icone { font-size: 15px; }
+.bh-jauge.mini { flex: 0.62; }
+.bh-jauge.mini .bhj-val { font-size: 12px; color: #9db2c7; font-weight: 600; }
+.bh-jauge.mini .bhj-icone { font-size: 11px; }
+.bh-jauge.alerte { border-color: #c9502f; background: #33191288; }
+.bh-jauge.alerte .bhj-val { color: #ff9a80; }
+.bh-jauge .pos { color: #7ec97e; }
+.bh-jauge .neg { color: #ff8a7a; }
+
+/* ---------- Bandeau d'alerte critique ---------- */
+#bandeau-alerte {
+  position: absolute; left: 8px; right: 8px;
+  top: calc(84px + env(safe-area-inset-top));
+  display: none; align-items: center; gap: 10px;
+  border-radius: 12px; padding: 10px 12px;
+  z-index: 8; box-shadow: 0 8px 26px #000a;
+  animation: tomberBandeau 0.3s ease;
+}
+#bandeau-alerte.visible { display: flex; }
+#bandeau-alerte.critique { background: linear-gradient(180deg, #7a1f16, #5e1b16); border: 1px solid #ff4433; }
+#bandeau-alerte.attention { background: linear-gradient(180deg, #6b501a, #4d3a14); border: 1px solid #c9962f; }
+#bandeau-alerte.bonne { background: linear-gradient(180deg, #1c5638, #14402a); border: 1px solid #2e8b57; }
+@keyframes tomberBandeau {
+  from { opacity: 0; transform: translateY(-14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.ba-icone { font-size: 22px; flex-shrink: 0; }
+.ba-texte { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.ba-texte b { font-size: 14px; color: #fff; }
+.ba-texte small { font-size: 11.5px; color: #ffffffc4; line-height: 1.35; }
+.ba-fermer {
+  background: #ffffff1f; border: none; border-radius: 50%;
+  width: 26px; height: 26px; color: #fff; font-size: 13px; flex-shrink: 0;
+}
+
+/* ---------- Rapport de fin de tour ---------- */
+#rapport-tour {
+  position: absolute; left: 10px; right: 10px;
+  bottom: calc(78px + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, #1b2635f2, #131c27f2);
+  border: 1px solid #3a4f66; border-radius: 14px;
+  padding: 10px 12px; z-index: 6;
+  box-shadow: 0 10px 30px #000b;
+  opacity: 0; transform: translateY(16px); pointer-events: none;
+  transition: opacity 0.25s, transform 0.25s;
+}
+#rapport-tour.visible { opacity: 1; transform: translateY(0); pointer-events: auto; }
+.rt-entete { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.rt-entete b { font-size: 13px; color: #ffe9a0; }
+.rt-entete small { font-size: 11px; color: #9db2c7; }
+.rt-fermer {
+  margin-left: auto; background: #223142; border: none; border-radius: 50%;
+  width: 24px; height: 24px; color: #e8e2d5; font-size: 12px;
+}
+.rt-gains { display: flex; gap: 14px; font-size: 19px; font-weight: 700; margin-bottom: 7px; }
+.rt-gains .pos { color: #7ec97e; }
+.rt-gains .neg { color: #ff8a7a; }
+.rt-postes { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+.rt-postes span {
+  font-size: 11px; font-weight: 600; padding: 3px 8px;
+  background: #223142; border-radius: 20px;
+}
+.rt-postes .pos { color: #7ec97e; }
+.rt-postes .neg { color: #ff8a7a; }
+.rt-detail {
+  width: 100%; background: #223142; color: #ffe9a0;
+  border: 1px solid #3a4f66; border-radius: 9px;
+  padding: 8px; font-size: 12px; font-weight: 600;
+}
+
+/* ---------- HUB ---------- */
+#hub {
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, #0f1721fa, #0b1119fd);
+  z-index: 9;
+  display: none; flex-direction: column;
+  padding-top: env(safe-area-inset-top);
+}
+#hub.ouvert { display: flex; }
+.hub-entete {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--coul) 34%, #16202c), #16202c);
+  border-bottom: 2px solid var(--coul);
+}
+.hub-blason { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #ffffff59; flex-shrink: 0; }
+.hub-ident { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.hub-ident b { font-size: 16px; color: #f4efe3; }
+.hub-ident small { font-size: 11px; color: #a9bccf; }
+.pp-fermer {
+  background: #223142; border: 1px solid #3a4f66; border-radius: 50%;
+  width: 32px; height: 32px; color: #e8e2d5; font-size: 14px; flex-shrink: 0;
+}
+.hub-onglets { display: flex; gap: 5px; padding: 9px 10px; background: #10171f; }
+.hub-onglet {
+  flex: 1; position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: #1a2634; border: 1px solid #2e3f52; border-radius: 10px;
+  padding: 7px 3px; font-size: 15px; color: #9db2c7;
+}
+.hub-onglet span { font-size: 10px; font-weight: 600; }
+.hub-onglet.actif { background: #26374a; border-color: #c9962f; color: #ffe9a0; }
+.hub-onglet.danger { border-color: #ff4433; }
+.hub-onglet i {
+  position: absolute; top: -5px; right: -3px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  background: #3a4f66; color: #fff; border-radius: 8px;
+  font-size: 9.5px; font-style: normal; font-weight: 700; line-height: 16px;
+}
+.hub-onglet.danger i { background: #e03e2f; }
+.hub-corps {
+  flex: 1; overflow-y: auto; touch-action: pan-y;
+  padding: 12px 12px calc(20px + env(safe-area-inset-bottom));
+}
+
+/* Appels à l'action en tête du hub */
+.hub-appel {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border-radius: 11px; padding: 11px 12px; margin-bottom: 8px;
+  font-size: 12.5px; text-align: left; color: #f0e9db; line-height: 1.35;
+}
+.hub-appel b { font-weight: 700; }
+.hub-appel.danger { background: #4a1712; border: 1px solid #ff4433; }
+.hub-appel.bonne { background: #16412c; border: 1px solid #2e8b57; }
+
+/* Tuiles de synthèse */
+.hub-tuiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px; }
+.tuile {
+  background: #16202c; border: 1px solid #2e3f52; border-radius: 12px;
+  padding: 10px 12px; display: flex; flex-direction: column; gap: 1px;
+}
+.tuile b { font-size: 22px; color: #f4efe3; line-height: 1.1; }
+.tuile small { font-size: 11px; color: #9db2c7; }
+.tuile i { font-size: 10.5px; color: #7d93a8; font-style: normal; margin-top: 2px; }
+.tuile.alerte { border-color: #c9502f; background: #2a1712; }
+.tuile.alerte b { color: #ff9a80; }
+
+/* Cartes menace / opportunité */
+.hub-carte {
+  display: flex; align-items: center; gap: 10px;
+  background: #16202c; border: 1px solid #2e3f52; border-left: 4px solid #3a4f66;
+  border-radius: 11px; padding: 10px 12px; margin-bottom: 8px;
+}
+.hub-carte.critique { border-left-color: #ff4433; background: #241511; }
+.hub-carte.attention { border-left-color: #c9962f; background: #221d10; }
+.hub-carte.pret { border-left-color: #2e8b57; background: #12251b; }
+.hub-carte.attente { border-left-color: #3a4f66; opacity: 0.75; }
+.hub-carte:active { background: #26374a; }
+.hc-icone { font-size: 21px; flex-shrink: 0; }
+.hc-blason { width: 17px; height: 17px; border-radius: 50%; border: 2px solid #ffffff4d; flex-shrink: 0; }
+.hc-corps { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+.hc-corps b { font-size: 13.5px; color: #f0e9db; }
+.hc-corps small { font-size: 11.5px; color: #9db2c7; line-height: 1.4; }
+.hc-fleche { color: #7d93a8; font-size: 20px; flex-shrink: 0; }
+.hub-vide {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  text-align: center; padding: 36px 20px; font-size: 34px;
+}
+.hub-vide b { font-size: 15px; color: #f0e9db; }
+.hub-vide small { font-size: 12.5px; color: #9db2c7; line-height: 1.5; }
+.hub-vide .btn { margin-top: 8px; font-size: 13px; }
+
+/* Totaux économiques */
+.hub-total {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin: 16px 0 8px; padding-bottom: 6px;
+  border-bottom: 1px solid #2e3f52;
+  font-size: 14px; font-weight: 600; color: #ffe9a0;
+}
+.hub-total b { font-size: 22px; color: #7ec97e; }
+.hub-total b small { font-size: 11px; font-weight: 400; color: #9db2c7; }
+.hub-total.neg b { color: #ff8a7a; }
+
+/* Lignes d'alerte */
+.alerte-ligne {
+  display: flex; gap: 10px; align-items: flex-start;
+  background: #1d2a39; border-left: 4px solid #3a4f66;
+  border-radius: 9px; padding: 9px 11px; margin-bottom: 7px;
+}
+.alerte-ligne.critique { border-left-color: #ff4433; background: #241511; }
+.alerte-ligne.attention { border-left-color: #c9962f; }
+.alerte-ligne.bonne { border-left-color: #2e8b57; }
+.al-icone { font-size: 18px; flex-shrink: 0; }
+.al-corps { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.al-corps b { font-size: 13px; color: #f0e9db; }
+.al-corps small { font-size: 11.5px; color: #9db2c7; line-height: 1.4; }
+.al-tour { color: #6f8499 !important; font-size: 10px !important; }
 
 /* Barre du bas */
 #barre-bas {
@@ -88,10 +324,12 @@ button { font-family: inherit; cursor: pointer; }
 .btn-barre:active { background: #2e4258; }
 .btn-fin-tour { background: #7a5c1e; border-color: #c9962f; }
 .btn-fin-tour:active { background: #96762e; }
+.btn-hub { background: #1e3350; border-color: #4a6f9e; }
+.btn-hub:active { background: #27436a; }
 
 /* ---------- Calques de carte ---------- */
 #modes-carte {
-  position: absolute; top: calc(44px + env(safe-area-inset-top)); left: 8px;
+  position: absolute; top: calc(88px + env(safe-area-inset-top)); left: 8px;
   display: flex; flex-direction: column; gap: 5px;
   z-index: 4;
 }

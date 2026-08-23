@@ -131,7 +131,7 @@ function initPixi() {
     UI.monde.addChild(UI.couches[nom]);
   }
   // Graphics partagés
-  for (const nom of ['eau', 'vagues', 'terrain', 'politique', 'frontieres', 'routes', 'cibles', 'selection', 'unites']) {
+  for (const nom of ['eau', 'vagues', 'terrain', 'politique', 'frontieres', 'mien', 'routes', 'cibles', 'selection', 'unites']) {
     UI.gfx[nom] = new PIXI.Graphics();
   }
   UI.couches.routes.addChild(UI.gfx.routes);
@@ -140,6 +140,7 @@ function initPixi() {
   UI.couches.terrain.addChild(UI.gfx.terrain);
   UI.couches.politique.addChild(UI.gfx.politique);
   UI.couches.frontieres.addChild(UI.gfx.frontieres);
+  UI.couches.frontieres.addChild(UI.gfx.mien);
   UI.couches.surbrillance.addChild(UI.gfx.cibles);
   UI.couches.surbrillance.addChild(UI.gfx.selection);
   UI.couches.unites.addChild(UI.gfx.unites);
@@ -315,15 +316,22 @@ function dessiner() {
   const modeC = UI.modeCarte;
   const alphaPol = modeC === 'terrain' ? 0 : modeC === 'ressources' ? 0.25 : modeC === 'militaire' ? 0.82 : 0.61;
 
+  // Mon royaume doit se lire d'un coup d'œil : teinte plus franche que les
+  // autres nations, et un liseré doré tout autour de mes terres.
+  const gMien = UI.gfx.mien; gMien.clear();
+  const mesEnnemis = new Set(nation(G.joueur).guerres.filter(g => nation(g).vivante));
+
   for (const p of G.provinces) {
     if (p.terrain === 'eau') continue;
     const c = hexCentre(p.col, p.row);
     const pts = hexSommets(c.x, c.y, s - 0.5);
+    const mien = p.proprietaire === G.joueur;
 
-    // Teinte politique
+    // Teinte politique — la mienne saturée, celle des autres en retrait
     if (alphaPol > 0) {
       if (p.proprietaire >= 0) {
-        gPol.beginFill(couleurNum(nation(p.proprietaire).couleur), alphaPol);
+        const a = mien ? Math.min(0.95, alphaPol * 1.3) : alphaPol * 0.78;
+        gPol.beginFill(couleurNum(nation(p.proprietaire).couleur), a);
         gPol.drawPolygon(pts.flat());
         gPol.endFill();
       } else {
@@ -337,20 +345,33 @@ function dessiner() {
     for (const vid of voisinsHex(p.col, p.row)) {
       const v = G.provinces[vid];
       const cv = hexCentre(v.col, v.row);
+      const [a, b] = areteVers(pts, cv);
       if (v.terrain === 'eau') {
-        const [a, b] = areteVers(pts, cv);
-        gFro.lineStyle(2.5, 0xe8d9a0, 0.4);
-        gFro.moveTo(a[0], a[1]);
-        gFro.lineTo(b[0], b[1]);
+        if (!mien) {
+          gFro.lineStyle(2.5, 0xe8d9a0, 0.4);
+          gFro.moveTo(a[0], a[1]);
+          gFro.lineTo(b[0], b[1]);
+        }
       } else if (v.proprietaire !== p.proprietaire) {
-        const [a, b] = areteVers(pts, cv);
-        const coul = p.proprietaire >= 0 ? assombrirNum(nation(p.proprietaire).couleur, 1.35) : 0x111111;
-        gFro.lineStyle(3, coul, p.proprietaire >= 0 ? 1 : 0.6);
+        // Frontière avec un ennemi en guerre : trait rouge alarmant
+        const guerre = mien && mesEnnemis.has(v.proprietaire);
+        const coul = guerre ? 0xff4433
+          : p.proprietaire >= 0 ? assombrirNum(nation(p.proprietaire).couleur, 1.35) : 0x111111;
+        gFro.lineStyle(guerre ? 4 : 3, coul, p.proprietaire >= 0 ? 1 : 0.6);
         gFro.moveTo(a[0], a[1]);
         gFro.lineTo(b[0], b[1]);
       }
+      // Contour extérieur de mon royaume (mer comprise) : double trait doré
+      if (mien && (v.terrain === 'eau' || v.proprietaire !== G.joueur)) {
+        for (const [larg, coulM, alphaM] of [[7, 0x000000, 0.35], [4.5, 0xffe9a0, 0.95]]) {
+          gMien.lineStyle(larg, coulM, alphaM);
+          gMien.moveTo(a[0], a[1]);
+          gMien.lineTo(b[0], b[1]);
+        }
+      }
     }
     gFro.lineStyle(0);
+    gMien.lineStyle(0);
 
     // Icônes capitale / cité-état / forteresse / port (pool)
     let icones = '';
@@ -1287,13 +1308,19 @@ function uiChoixEvenement(i) {
 function uiFinDeTour() {
   if (G.fini) return;
   deselectionner();
+  fermerHub();
+  const avant = (G.alertes || []).length;
+  const orAvant = nation(G.joueur).or;
   const { evenementsTour, fin } = finDeTour();
   sauvegarder();
   majTout();
 
-  // Résumé des revenus du tour
-  const rev = revenus(G.joueur);
-  toast(`Tour ${G.tour} : ${rev.or >= 0 ? '+' : ''}${rev.or} 💰 · ${rev.nourriture >= 0 ? '+' : ''}${rev.nourriture} 🌾 · +${rev.science} 🔬`);
+  // Rapport du tour : d'où vient exactement ce que je viens de gagner
+  afficherRapportTour(Math.floor(nation(G.joueur).or - orAvant));
+  // Les alertes nées de ce tour s'affichent en bandeau, la plus grave d'abord
+  const nouvelles = (G.alertes || []).slice(0, Math.max(0, (G.alertes || []).length - avant));
+  const majeure = nouvelles.find(a => a.gravite === 'critique') || nouvelles[0];
+  if (majeure) afficherBandeau(majeure);
   for (const msg of evenementsTour) toast(msg);
   if (G.message) {
     const m = G.message; G.message = null;
@@ -1303,6 +1330,58 @@ function uiFinDeTour() {
     return;
   }
   suiteFinDeTour(!!fin, fin);
+}
+
+// ---------- Rapport de fin de tour ----------
+// « +27 d'or » ne dit rien tout seul : on montre les trois postes qui pèsent
+// le plus dans ce chiffre, et un lien vers le détail complet.
+function afficherRapportTour(gagneOr) {
+  const moi = nation(G.joueur);
+  const rev = revenus(G.joueur);
+  const d = rev.detail;
+
+  // Les postes affichés décomposent exactement le chiffre en vedette :
+  // les plus lourds sont nommés, le reste est regroupé sous « divers ».
+  const tous = [
+    ['Provinces', d.orProvinces + d.orBonus],
+    ['Impôts', d.impots],
+    ['Commerce', d.commerce],
+    ['Tributs', d.tribut],
+    ['Armée', -d.entretienArmee],
+    ['Flotte', -d.entretienFlotte],
+    ['Dette', -(rev.interets || 0)],
+    ['Suzerain', -d.verse],
+  ].filter(([, v]) => Math.round(v) !== 0)
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
+  const nommes = tous.slice(0, 4);
+  const reste = rev.or - nommes.reduce((s, [, v]) => s + Math.round(v), 0);
+  const postes = nommes.map(([nom, v]) => [nom, Math.round(v)]);
+  if (Math.round(reste) !== 0) {
+    postes.push([d.instable ? 'Instabilité' : 'Divers', Math.round(reste)]);
+  }
+
+  const el = document.getElementById('rapport-tour');
+  el.innerHTML = `
+    <div class="rt-entete">
+      <b>Tour ${G.tour}</b><small>an ${G.annee} · encaissé : ${gagneOr >= 0 ? '+' : ''}${gagneOr} 💰</small>
+      <button class="rt-fermer" onclick="fermerRapport()">✕</button>
+    </div>
+    <div class="rt-gains">
+      <span class="${rev.or >= 0 ? 'pos' : 'neg'}">${rev.or >= 0 ? '+' : ''}${rev.or} 💰</span>
+      <span class="${rev.nourriture >= 0 ? 'pos' : 'neg'}">${rev.nourriture >= 0 ? '+' : ''}${rev.nourriture} 🌾</span>
+      <span class="pos">+${rev.science} 🔬</span>
+    </div>
+    <div class="rt-postes">${postes.map(([nom, v]) =>
+      `<span class="${v > 0 ? 'pos' : 'neg'}">${nom} ${v > 0 ? '+' : ''}${v}</span>`).join('')}</div>
+    <button class="rt-detail" onclick="fermerRapport();ouvrirHub('economie')">Voir le détail complet ›</button>`;
+  el.classList.add('visible');
+  clearTimeout(UI.rapportTimer);
+  UI.rapportTimer = setTimeout(fermerRapport, 7000);
+}
+
+function fermerRapport() {
+  clearTimeout(UI.rapportTimer);
+  document.getElementById('rapport-tour').classList.remove('visible');
 }
 
 function suiteFinDeTour(aFin, fin) {
@@ -1329,19 +1408,108 @@ function afficherFin(fin) {
 }
 
 // ---------- Barre du haut ----------
+// Hiérarchie : identité du royaume et alertes en haut (ce qui doit sauter aux
+// yeux), l'or en vedette au-dessous, les jauges secondaires en plus discret.
 function majBarre() {
   const moi = nation(G.joueur);
   const rev = revenus(G.joueur);
-  const fmt = (v, r) => `${Math.floor(v)}<small class="${r >= 0 ? 'pos' : 'neg'}">${r >= 0 ? '+' : ''}${r}</small>`;
+  const nonLues = alertesNonLues().length;
+  const critiques = alertesNonLues().some(a => a.gravite === 'critique');
+  const guerres = moi.guerres.filter(g => nation(g).vivante).length;
+
+  // Une ressource : valeur en gros, variation par tour en couleur juste après
+  const jauge = (icone, valeur, delta, cls, titre) => `
+    <button class="bh-jauge ${cls}" onclick="ouvrirHub('economie')" title="${titre}">
+      <span class="bhj-icone">${icone}</span>
+      <span class="bhj-val">${Math.floor(valeur)}</span>
+      <span class="bhj-delta ${delta >= 0 ? 'pos' : 'neg'}">${delta >= 0 ? '+' : ''}${delta}</span>
+    </button>`;
+
   document.getElementById('barre-haut').innerHTML = `
-    <span class="bh-nation" onclick="ouvrirResume()"><span class="pastille" style="background:${moi.couleur}"></span>${moi.nom}</span>
-    <span onclick="ouvrirResume()" title="Or">💰 ${fmt(moi.or, rev.or)}</span>
-    <span onclick="ouvrirResume()" title="Nourriture">🌾 ${fmt(moi.nourriture, rev.nourriture)}</span>
-    <span onclick="ouvrirResume()" title="Science">🔬 ${fmt(moi.science, rev.science)}</span>
-    <span onclick="ouvrirResume()" title="Stabilité">🏛️ ${Math.floor(moi.stabilite)}%</span>
-    <span onclick="ouvrirResume()" title="Population">👥 ${rev.popTotale}</span>
-    <span class="bh-ere" onclick="ouvrirResume()">${ERES[moi.ere].icone} An ${G.annee} 📊</span>
-    <button class="bh-menu" onclick="ouvrirMenu()">⚙️</button>`;
+    <div class="bh-rang1">
+      <button class="bh-nation" onclick="ouvrirHub()" style="--coul:${moi.couleur}">
+        <span class="bh-blason" style="background:${moi.couleur}"></span>
+        <span class="bh-nom">${moi.nom}</span>
+        <span class="bh-sous">an ${G.annee} · ${provincesDe(G.joueur).length} prov.</span>
+      </button>
+      ${guerres ? `<button class="bh-guerre" onclick="ouvrirHub('menaces')" title="Guerres en cours">⚔️ ${guerres}</button>` : ''}
+      <button class="bh-cloche ${nonLues ? (critiques ? 'critique' : 'actif') : ''}" onclick="ouvrirAlertes()" title="Alertes">
+        🔔${nonLues ? `<span class="bh-pastille">${nonLues}</span>` : ''}
+      </button>
+      <button class="bh-menu" onclick="ouvrirMenu()">⚙️</button>
+    </div>
+    <div class="bh-rang2">
+      ${jauge('💰', moi.or, rev.or, 'or', 'Or — appuyez pour le détail')}
+      ${jauge('🌾', moi.nourriture, rev.nourriture, 'nour', 'Nourriture')}
+      ${jauge('🔬', moi.science, rev.science, 'sci', 'Science')}
+      <button class="bh-jauge mini ${moi.stabilite < 50 ? 'alerte' : ''}" onclick="ouvrirHub('menaces')" title="Stabilité">
+        <span class="bhj-icone">🏛️</span><span class="bhj-val">${Math.floor(moi.stabilite)}%</span>
+      </button>
+      <button class="bh-jauge mini" onclick="ouvrirHub()" title="Population">
+        <span class="bhj-icone">👥</span><span class="bhj-val">${rev.popTotale}</span>
+      </button>
+    </div>`;
+}
+
+// ---------- Bandeau d'alerte critique ----------
+// Une guerre déclarée ou une province perdue ne doit pas passer dans un toast
+// fugace : le bandeau reste jusqu'à ce que le joueur l'ait vu.
+function afficherBandeau(a) {
+  const el = document.getElementById('bandeau-alerte');
+  el.className = 'visible ' + a.gravite;
+  el.innerHTML = `
+    <span class="ba-icone">${a.icone}</span>
+    <span class="ba-texte"><b>${a.titre}</b><small>${a.texte}</small></span>
+    <button class="ba-fermer" onclick="fermerBandeau()">✕</button>`;
+  el.onclick = (e) => {
+    if (e.target.closest('.ba-fermer')) return;
+    fermerBandeau();
+    ouvrirAlertes();
+  };
+  clearTimeout(UI.bandeauTimer);
+  UI.bandeauTimer = setTimeout(fermerBandeau, 9000);
+}
+
+function fermerBandeau() {
+  clearTimeout(UI.bandeauTimer);
+  document.getElementById('bandeau-alerte').className = '';
+}
+
+// ---------- Journal des alertes ----------
+function ouvrirAlertes() {
+  const liste = (G.alertes || []);
+  for (const a of liste) a.lue = true;
+  majBarre();
+  const contenu = liste.length === 0
+    ? '<p><small>Aucune alerte pour l\'instant. Les déclarations de guerre, provinces perdues, famines et révoltes apparaîtront ici.</small></p>'
+    : liste.slice(0, 20).map(a => `
+      <div class="alerte-ligne ${a.gravite}" ${a.cible ? `onclick="allerVers('${a.cible.type}',${a.cible.id})"` : ''}>
+        <span class="al-icone">${a.icone}</span>
+        <div class="al-corps">
+          <b>${a.titre}</b>
+          <small>${a.texte}</small>
+          <small class="al-tour">tour ${a.tour}${a.cible ? ' · appuyez pour y aller' : ''}</small>
+        </div>
+      </div>`).join('');
+  ouvrirModale(`<h2>🔔 Alertes</h2>${contenu}
+    <div class="rangee-btn"><button class="btn" onclick="fermerModale()">Fermer</button></div>`);
+}
+
+// Va sur la carte à l'endroit concerné par une alerte
+function allerVers(type, id) {
+  fermerModale();
+  fermerHub();
+  if (type === 'province') {
+    const p = G.provinces[id];
+    if (!p) return;
+    const c = hexCentre(p.col, p.row);
+    UI.cam.zoom = 0.9;
+    UI.cam.x = UI.app.screen.width / 2 - c.x * UI.cam.zoom;
+    UI.cam.y = UI.app.screen.height / 2 - c.y * UI.cam.zoom;
+    afficherPanneauProvince(id);
+  } else if (type === 'nation') {
+    ouvrirDiplomatieAvec(id);
+  }
 }
 
 // ---------- Écran Empire (détail des revenus et forces) ----------
@@ -1351,46 +1519,78 @@ function ligneDetail(label, valeur, icone) {
   return `<div class="ligne-detail"><span>${label}</span><b class="${cls}">${valeur > 0 ? '+' : ''}${valeur} ${icone}</b></div>`;
 }
 
-function ouvrirResume() {
+// ---------- HUB — où j'en suis, en un coup d'œil ----------
+// Quatre questions dans l'ordre : qui suis-je, qu'est-ce qui me menace,
+// que puis-je saisir, d'où vient mon argent.
+function ouvrirHub(section) {
   const moi = nation(G.joueur);
-  const rev = revenus(G.joueur);
-  const d = rev.detail;
-  const prod = productionMarchandises(G.joueur);
-  // Armée totale
+  const b = bilanRoyaume(G.joueur);
+  const rev = b.rev;
+  UI.hubSection = section || UI.hubSection || 'royaume';
+  for (const a of (G.alertes || [])) a.lue = true;
+
+  const onglets = [
+    ['royaume', '🛡️', 'Royaume'],
+    ['menaces', '⚠️', 'Menaces', b.menaces.length],
+    ['opportunites', '✨', 'Saisir', b.opportunites.length],
+    ['economie', '💰', 'Économie'],
+  ].map(([id, ic, lib, n]) => `
+    <button class="hub-onglet ${UI.hubSection === id ? 'actif' : ''} ${id === 'menaces' && b.menaces.some(m => m.gravite === 'critique') ? 'danger' : ''}"
+      onclick="ouvrirHub('${id}')">${ic}<span>${lib}</span>${n ? `<i>${n}</i>` : ''}</button>`).join('');
+
+  const html = `
+    <div class="hub-entete" style="--coul:${moi.couleur}">
+      <span class="hub-blason" style="background:${moi.couleur}"></span>
+      <div class="hub-ident">
+        <b>${moi.nom}</b>
+        <small>${ERES[moi.ere].icone} ${ERES[moi.ere].nom} · an ${G.annee} · 👑 ${moi.dirigeant.nom}</small>
+      </div>
+      <button class="pp-fermer" onclick="fermerHub()">✕</button>
+    </div>
+    <div class="hub-onglets">${onglets}</div>
+    <div class="hub-corps">${
+      UI.hubSection === 'menaces' ? hubMenaces(b)
+      : UI.hubSection === 'opportunites' ? hubOpportunites(b)
+      : UI.hubSection === 'economie' ? hubEconomie(moi, rev)
+      : hubRoyaume(moi, b, rev)}</div>`;
+
+  const el = document.getElementById('hub');
+  el.innerHTML = html;
+  el.classList.add('ouvert');
+  majBarre();
+}
+
+function fermerHub() {
+  document.getElementById('hub').classList.remove('ouvert');
+}
+
+// Vue d'ensemble : mes forces, mon territoire, mon état de santé
+function hubRoyaume(moi, b, rev) {
   const total = armeeVide();
   for (const p of provincesDe(G.joueur)) {
     total.inf += p.armee.inf; total.choc += p.armee.choc; total.siege += p.armee.siege;
   }
-  // Progression vers la prochaine ère
+  const rang = [...G.nations].filter(n => n.vivante)
+    .map(n => ({ n, pts: provincesDe(n.id).length }))
+    .sort((a, c) => c.pts - a.pts);
+  const monRang = rang.findIndex(r => r.n.id === G.joueur) + 1;
+  const critiques = b.menaces.filter(m => m.gravite === 'critique');
   const prochaine = ERES[moi.ere + 1];
-  const seuilProchain = prochaine ? seuilEre(moi.ere + 1) : 0;
-  const barre = prochaine
-    ? `<div class="barre-prog"><div class="barre-prog-int" style="width:${Math.min(100, Math.round(moi.science / seuilProchain * 100))}%"></div></div>
-       <p><small>${Math.floor(moi.science)} / ${seuilProchain} 🔬 vers « ${prochaine.nom} » (+${rev.science}/tour)</small></p>`
-    : '<p><small>Ère finale atteinte — visez l\'Ascension Stellaire !</small></p>';
 
-  ouvrirModale(`<h2>📊 ${moi.nom}</h2>
-    ${d.bloque ? '<p><b>⛔ BLOCUS NAVAL !</b> Routes maritimes coupées, ports affaiblis.</p>' : ''}
-    ${d.instable ? '<p><b>⚠️ Instabilité !</b> (stabilité < 50) Tous les revenus sont réduits de 30 %.</p>' : ''}
-    <h3 class="titre-section">💰 Or : ${rev.or >= 0 ? '+' : ''}${rev.or}/tour</h3>
-    ${ligneDetail('Provinces (terrain, marchés, ports, mines d\'or)', d.orProvinces, '💰')}
-    ${ligneDetail('Doctrine et souverain', d.orBonus, '💰')}
-    ${ligneDetail('Impôts (' + rev.popTotale + ' 👥 × 0,15)', d.impots, '💰')}
-    ${ligneDetail('Commerce (accords et routes maritimes)', d.commerce, '💰')}
-    ${ligneDetail('Tributs des vassaux', d.tribut, '💰')}
-    ${ligneDetail('Versé au suzerain', -d.verse, '💰')}
-    ${ligneDetail('Entretien de l\'armée (' + d.troupes + ' ⚔️)', -d.entretienArmee, '💰')}
-    ${ligneDetail('Entretien de la flotte (' + moi.flotte + ' ⛵)', -d.entretienFlotte, '💰')}
-    ${ligneDetail('Intérêts de la dette (' + moi.dette + ' 💰 dus)', -(rev.interets || 0), '💰')}
-    <h3 class="titre-section">🌾 Nourriture : ${rev.nourriture >= 0 ? '+' : ''}${rev.nourriture}/tour</h3>
-    ${ligneDetail('Provinces et fermes', d.nourProvinces, '🌾')}
-    ${ligneDetail('Doctrine agraire', d.nourBonus, '🌾')}
-    ${ligneDetail('Ravitaillement des troupes', -d.rationTroupes, '🌾')}
-    <h3 class="titre-section">🔬 Science : +${rev.science}/tour</h3>
-    ${barre}
-    <h3 class="titre-section">📦 Production /tour</h3>
-    <div class="pp-stats">${Object.entries(MARCHANDISES).map(([b, def]) =>
-      `<span>${def.icone} ${moi.marchandises[b] | 0} <small class="pos">+${prod[b]}</small></span>`).join('')}</div>
+  return `
+    ${critiques.length ? `<button class="hub-appel danger" onclick="ouvrirHub('menaces')">
+      ⚠️ <b>${critiques.length} menace${critiques.length > 1 ? 's' : ''} critique${critiques.length > 1 ? 's' : ''}</b> — ${critiques[0].titre}</button>` : ''}
+    ${b.opportunites.filter(o => o.pret).length ? `<button class="hub-appel bonne" onclick="ouvrirHub('opportunites')">
+      ✨ <b>${b.opportunites.filter(o => o.pret).length} action${b.opportunites.filter(o => o.pret).length > 1 ? 's' : ''} possible${b.opportunites.filter(o => o.pret).length > 1 ? 's' : ''}</b> — ${b.opportunites.find(o => o.pret).titre}</button>` : ''}
+
+    <div class="hub-tuiles">
+      <div class="tuile"><b>${b.provinces}</b><small>provinces</small><i>${monRang}ᵉ sur ${rang.length}</i></div>
+      <div class="tuile"><b>${b.pop}</b><small>habitants</small><i>+${rev.detail.impots} 💰 d'impôts</i></div>
+      <div class="tuile"><b>${b.troupes}</b><small>soldats</small><i>−${rev.detail.entretienArmee} 💰/tour</i></div>
+      <div class="tuile ${moi.stabilite < 50 ? 'alerte' : ''}"><b>${Math.floor(moi.stabilite)}%</b><small>stabilité</small>
+        <i>${moi.stabilite < 50 ? 'revenus −30 %' : 'royaume calme'}</i></div>
+    </div>
+
     <h3 class="titre-section">⚔️ Forces armées</h3>
     <div class="pp-stats">
       <span>${TYPES_UNITES.inf.icone} ${total.inf} ${TYPES_UNITES.inf.noms[moi.ere]}</span>
@@ -1398,21 +1598,107 @@ function ouvrirResume() {
       <span>${TYPES_UNITES.siege.icone} ${total.siege} ${TYPES_UNITES.siege.noms[moi.ere]}</span>
       <span>⛵ ${moi.flotte} navires</span>
     </div>
+
+    <h3 class="titre-section">${ERES[moi.ere].icone} Progression</h3>
+    ${prochaine ? `<div class="barre-prog"><div class="barre-prog-int" style="width:${Math.min(100, Math.round(moi.science / seuilEre(moi.ere + 1) * 100))}%"></div></div>
+      <p><small>${Math.floor(moi.science)} / ${seuilEre(moi.ere + 1)} 🔬 vers « ${prochaine.nom} » (+${rev.science}/tour)</small></p>`
+    : '<p><small>Ère finale atteinte — visez l\'Ascension Stellaire !</small></p>'}
+
     <h3 class="titre-section">🏛️ Factions internes</h3>
     ${['nobles', 'marchands', 'peuple'].map(f => {
       const v = moi.factions[f];
       const coul = v <= 25 ? '#e55' : v <= 40 ? '#cc5' : '#7ec97e';
       const noms = { nobles: '⚜️ Noblesse', marchands: '⚖️ Marchands', peuple: '👥 Peuple' };
-      return `<div class="ligne-detail"><span>${noms[f]}${v <= 25 ? ' ⚠️ risque de révolte !' : ''}</span>
-        <span class="barre-prog" style="width:90px"><span class="barre-prog-int" style="width:${v}%;background:${coul};display:block;height:100%"></span></span></div>`;
+      return `<div class="ligne-detail"><span>${noms[f]}${v <= 25 ? ' ⚠️' : ''}</span>
+        <span class="barre-prog" style="width:90px;margin:0"><span class="barre-prog-int" style="width:${v}%;background:${coul};display:block;height:100%"></span></span></div>`;
     }).join('')}
-    <p><small>La guerre plaît aux nobles mais fâche les marchands ; les fêtes et le luxe apaisent le peuple. Une faction à bout se soulève !</small></p>
-    <p><small>👑 ${moi.dirigeant.nom} (${moi.dirigeant.age} ans) ·
-    ${moi.general ? '⚔️ Général ' + moi.general.nom + ' (' + (moi.general.victoires || 0) + ' victoires)' : 'aucun général (voir Dynastie)'} ·
-    🕵️ ${moi.espions} espion(s) ·
-    ${moi.doctrine ? DOCTRINES[moi.doctrine].icone + ' ' + DOCTRINES[moi.doctrine].nom : 'aucune doctrine (voir Techno)'} ·
-    ${provincesDe(G.joueur).length} provinces</small></p>
-    <div class="rangee-btn"><button class="btn" onclick="fermerModale()">Fermer</button></div>`);
+
+    <h3 class="titre-section">📜 Dernières chroniques</h3>
+    ${G.journal.slice(0, 6).map(l => `<div class="ligne-journal"><small>Tour ${l.tour}</small> ${l.txt}</div>`).join('')}
+    <div class="rangee-btn"><button class="btn" onclick="ouvrirJournal()">📜 Tout le journal</button>
+      <button class="btn" onclick="ouvrirDynastie()">👑 Dynastie</button></div>`;
+}
+
+// Ce qui peut me coûter la partie
+function hubMenaces(b) {
+  if (!b.menaces.length) {
+    return `<div class="hub-vide">🕊️<b>Aucune menace</b>
+      <small>Personne ne vous fait la guerre, vos caisses et vos greniers tiennent, votre peuple est calme. C'est le moment de vous étendre.</small>
+      <button class="btn btn-principal" onclick="ouvrirHub('opportunites')">✨ Voir les opportunités</button></div>`;
+  }
+  return b.menaces.map(m => `
+    <div class="hub-carte ${m.gravite}" ${m.cible ? `onclick="allerVers('${m.cible.type}',${m.cible.id})"` : ''}>
+      ${m.couleur ? `<span class="hc-blason" style="background:${m.couleur}"></span>` : `<span class="hc-icone">${m.icone}</span>`}
+      <div class="hc-corps">
+        <b>${m.titre}</b>
+        <small>${m.texte}</small>
+      </div>
+      ${m.cible ? '<span class="hc-fleche">›</span>' : ''}
+    </div>`).join('');
+}
+
+// Ce que je peux saisir maintenant
+function hubOpportunites(b) {
+  if (!b.opportunites.length) {
+    return `<div class="hub-vide">🔭<b>Rien à saisir dans l'immédiat</b>
+      <small>Développez vos provinces et vos relations : de nouvelles occasions apparaîtront.</small></div>`;
+  }
+  return b.opportunites.map(o => `
+    <div class="hub-carte ${o.pret ? 'pret' : 'attente'}"
+      ${o.cible ? `onclick="allerVers('${o.cible.type}',${o.cible.id})"` : o.ecran === 'techno' ? 'onclick="fermerHub();ouvrirTechnologie()"' : ''}>
+      ${o.couleur ? `<span class="hc-blason" style="background:${o.couleur}"></span>` : `<span class="hc-icone">${o.icone}</span>`}
+      <div class="hc-corps">
+        <b>${o.titre}</b>
+        <small>${o.texte}</small>
+      </div>
+      ${o.cible || o.ecran ? '<span class="hc-fleche">›</span>' : ''}
+    </div>`).join('');
+}
+
+// D'où vient mon or, ligne par ligne
+function hubEconomie(moi, rev) {
+  const d = rev.detail;
+  const prod = productionMarchandises(G.joueur);
+  return `
+    ${d.bloque ? '<div class="hub-carte critique"><span class="hc-icone">⛔</span><div class="hc-corps"><b>Blocus naval</b><small>Routes maritimes coupées, ports affaiblis.</small></div></div>' : ''}
+    ${d.instable ? '<div class="hub-carte critique"><span class="hc-icone">⚠️</span><div class="hc-corps"><b>Instabilité</b><small>Stabilité sous 50 % : tous les revenus sont réduits de 30 %.</small></div></div>' : ''}
+
+    <div class="hub-total ${rev.or >= 0 ? '' : 'neg'}">
+      <span>💰 Or</span><b>${rev.or >= 0 ? '+' : ''}${rev.or}<small>/tour</small></b>
+    </div>
+    ${ligneDetail('Provinces (terrain, marchés, ports, mines)', d.orProvinces, '💰')}
+    ${ligneDetail('Doctrine et souverain', d.orBonus, '💰')}
+    ${ligneDetail(`Impôts (${rev.popTotale} 👥 × 0,15)`, d.impots, '💰')}
+    ${ligneDetail(`Commerce (${d.commerce ? rev.routesMaritimes + ' routes maritimes, ' + rev.caravanes + ' caravanes' : 'aucun accord'})`, d.commerce, '💰')}
+    ${ligneDetail('Tributs des vassaux', d.tribut, '💰')}
+    ${ligneDetail('Versé au suzerain', -d.verse, '💰')}
+    ${ligneDetail(`Entretien de l'armée (${d.troupes} ⚔️)`, -d.entretienArmee, '💰')}
+    ${ligneDetail(`Entretien de la flotte (${moi.flotte} ⛵)`, -d.entretienFlotte, '💰')}
+    ${ligneDetail(`Intérêts de la dette (${moi.dette} 💰 dus)`, -(rev.interets || 0), '💰')}
+    ${ligneDetail(d.instable ? 'Instabilité (−30 % sur le total)' : 'Arrondis',
+      rev.or - (d.orProvinces + d.orBonus + d.impots + d.commerce + d.tribut
+        - d.verse - d.entretienArmee - d.entretienFlotte - (rev.interets || 0)), '💰')}
+
+    <div class="hub-total ${rev.nourriture >= 0 ? '' : 'neg'}">
+      <span>🌾 Nourriture</span><b>${rev.nourriture >= 0 ? '+' : ''}${rev.nourriture}<small>/tour</small></b>
+    </div>
+    ${ligneDetail('Provinces et fermes', d.nourProvinces, '🌾')}
+    ${ligneDetail('Doctrine agraire', d.nourBonus, '🌾')}
+    ${ligneDetail('Ravitaillement des troupes', -d.rationTroupes, '🌾')}
+    ${ligneDetail(d.instable ? 'Instabilité (−30 %)' : 'Arrondis',
+      rev.nourriture - (d.nourProvinces + d.nourBonus - d.rationTroupes), '🌾')}
+
+    <div class="hub-total"><span>🔬 Science</span><b>+${rev.science}<small>/tour</small></b></div>
+    ${ligneDetail('Provinces et bibliothèques', d.sciProvinces, '🔬')}
+    ${ligneDetail('Doctrine rationaliste', d.sciBonus, '🔬')}
+    ${ligneDetail(d.instable ? 'Instabilité (−30 %)' : 'Arrondis',
+      rev.science - (d.sciProvinces + d.sciBonus), '🔬')}
+
+    <h3 class="titre-section">📦 Production de marchandises</h3>
+    <div class="pp-stats">${Object.entries(MARCHANDISES).map(([bien, def]) =>
+      `<span>${def.icone} ${moi.marchandises[bien] | 0} <small class="${prod[bien] ? 'pos' : ''}">${
+        def.manufacture ? '(atelier)' : '+' + (prod[bien] || 0)}</small></span>`).join('')}</div>
+    <div class="rangee-btn"><button class="btn" onclick="fermerHub();ouvrirCommerce()">📦 Marché</button></div>`;
 }
 
 // ---------- Menu & sauvegardes manuelles ----------
@@ -1481,7 +1767,9 @@ function ouvrirAide() {
     <h3 class="titre-section">Unités (${ERES[nation(G.joueur).ere].nom})</h3>${unites}
     <h3 class="titre-section">Les clés du jeu</h3>
     <p><small>
-    📊 <b>Tapez la barre du haut</b> pour le détail complet de vos revenus.<br>
+    🛡️ Le bouton <b>Royaume</b> (ou la barre du haut) ouvre votre tableau de bord : forces, <b>menaces</b>, <b>opportunités</b> et le détail de chaque pièce d'or gagnée.<br>
+    🔔 La <b>cloche</b> garde les événements importants : guerre déclarée, province perdue, famine. Une pastille rouge = à lire.<br>
+    ✨ Votre royaume est cerné d'un <b>liseré doré</b> sur la carte ; vos frontières avec un ennemi en guerre virent au <b>rouge</b>.<br>
     🗺️ Les boutons en haut à gauche changent la <b>vue de la carte</b> : politique, terrain, gisements 📦, militaire.<br>
     👥 La <b>population</b> travaille (rendement max à 8+) et fournit les recrues. Démobilisez pour repeupler.<br>
     ⛏️ Un <b>gisement</b> produit 1/tour ; avec son bâtiment (mine, scierie…) : jusqu'à 7/tour.<br>
@@ -1491,7 +1779,7 @@ function ouvrirAide() {
     💍 <b>Mariages royaux</b> et cadeaux montent les relations ; les alliés rejoignent vos guerres défensives.<br>
     🏭 Les <b>forges</b> (2 ⚒️ → 1 🗡️) et <b>ateliers</b> (2 🌶️ → 1 💎) créent des biens 3-4× plus chers — le peuple consomme du 💎.<br>
     ⚔️ Un <b>général</b> booste vos attaques ; les assauts répétés usent les <b>murailles</b> ennemies ; les guerres longues épuisent le peuple.<br>
-    🕵️ Les <b>espions</b> volent, sabotent, soulèvent et assassinent ; surveillez vos <b>factions</b> (écran Empire).<br>
+    🕵️ Les <b>espions</b> volent, sabotent, soulèvent et assassinent ; surveillez vos <b>factions</b> (écran Royaume).<br>
     🏆 <b>3 victoires</b> : domination (55 % des terres), science (Ascension), diplomatie (allié avec tous).
     </small></p>
     <div class="rangee-btn"><button class="btn" onclick="fermerModale()">Fermer</button></div>`);

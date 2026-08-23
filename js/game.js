@@ -751,6 +751,7 @@ function nouvellePartie(nationJoueur, mode = 'terre') {
     nations,
     joueur: nationJoueur,
     journal: [],
+    alertes: [],
     fini: false,
     message: null,
     marche: Object.fromEntries(Object.entries(MARCHANDISES).map(([k, m]) => [k, { prix: m.prixBase }])),
@@ -768,6 +769,202 @@ function nouvellePartie(nationJoueur, mode = 'terre') {
 function journal(txt) {
   G.journal.unshift({ tour: G.tour, txt });
   if (G.journal.length > 60) G.journal.pop();
+}
+
+// ---------- Alertes du joueur ----------
+// Événements qui doivent sauter aux yeux : guerre déclarée, province perdue,
+// famine, révolte… Empilées ici puis affichées par l'interface (bandeau rouge,
+// pastille dans la barre du haut, rapport de fin de tour).
+// gravite : 'critique' (rouge, exige une réaction) | 'attention' | 'bonne'
+function alerte(gravite, icone, titre, texte, cible) {
+  if (!G.alertes) G.alertes = [];
+  G.alertes.unshift({ tour: G.tour, gravite, icone, titre, texte, cible, lue: false });
+  if (G.alertes.length > 40) G.alertes.pop();
+}
+
+function alertesNonLues() {
+  return (G.alertes || []).filter(a => !a.lue);
+}
+
+// ---------- Bilan du royaume (écran Hub) ----------
+// Analyse l'état du joueur et en tire ce qui mérite son attention :
+// menaces (ce qui peut lui coûter la partie) et opportunités (ce qu'il peut saisir).
+function bilanRoyaume(nid) {
+  const n = nation(nid);
+  const miennes = provincesDe(nid);
+  const rev = revenus(nid);
+  const menaces = [];
+  const opportunites = [];
+
+  // --- Menaces militaires : qui me fait la guerre, et avec quelles forces ---
+  const maForce = puissanceMilitaire(nid);
+  for (const eid of n.guerres) {
+    const e = nation(eid);
+    if (!e.vivante) continue;
+    const saForce = puissanceMilitaire(eid);
+    // Troupes ennemies massées au contact de mes frontières
+    let auContact = 0;
+    for (const p of miennes) {
+      for (const vid of voisinsHex(p.col, p.row)) {
+        const v = G.provinces[vid];
+        if (v.proprietaire === eid) auContact += v.troupes;
+      }
+    }
+    const ratio = saForce / Math.max(1, maForce);
+    menaces.push({
+      gravite: ratio > 1.25 || auContact > 15 ? 'critique' : 'attention',
+      icone: '⚔️', couleur: e.couleur,
+      titre: `En guerre avec ${e.nom}`,
+      texte: `Force ${Math.round(saForce)} contre ${Math.round(maForce)} · ` +
+        (auContact > 0 ? `${auContact} soldats massés à vos frontières` : 'aucune troupe à vos frontières'),
+      cible: { type: 'nation', id: eid },
+    });
+  }
+
+  // --- Menaces de voisins hostiles qui ne m'ont pas encore déclaré la guerre ---
+  for (const autre of G.nations) {
+    if (!autre.vivante || autre.id === nid || enGuerre(nid, autre.id)) continue;
+    if (!frontalieres(nid, autre.id)) continue;
+    const rel = n.relations[autre.id];
+    if (rel > -30 || aPacte(nid, autre.id) || allies(nid, autre.id)) continue;
+    menaces.push({
+      gravite: 'attention', icone: '😠', couleur: autre.couleur,
+      titre: `${autre.nom} vous déteste (${rel})`,
+      texte: 'Voisin hostile sans pacte : une déclaration de guerre est probable. Offrez un présent ou signez un pacte.',
+      cible: { type: 'nation', id: autre.id },
+    });
+  }
+
+  // --- Menaces intérieures ---
+  if (n.stabilite < 50) {
+    menaces.push({
+      gravite: n.stabilite < 25 ? 'critique' : 'attention', icone: '🏛️',
+      titre: `Stabilité critique : ${Math.floor(n.stabilite)} %`,
+      texte: n.stabilite < 25 ? 'Sous 5 %, vos provinces font sécession. Faites la paix, organisez des fêtes.'
+        : 'Sous 50 %, tous vos revenus sont amputés de 30 %.',
+    });
+  }
+  for (const [f, nom] of [['nobles', '⚜️ Noblesse'], ['marchands', '⚖️ Marchands'], ['peuple', '👥 Peuple']]) {
+    if (n.factions[f] <= 30) {
+      menaces.push({
+        gravite: n.factions[f] <= 20 ? 'critique' : 'attention', icone: '✊',
+        titre: `${nom} au bord de la révolte (${n.factions[f]})`,
+        texte: f === 'nobles' ? 'La noblesse veut la gloire militaire.'
+          : f === 'marchands' ? 'Les marchands veulent la paix et le commerce.'
+          : 'Le peuple veut du pain, du luxe et des fêtes.',
+      });
+    }
+  }
+  if (rev.nourriture < 0) {
+    const tours = n.nourriture > 0 ? Math.ceil(n.nourriture / -rev.nourriture) : 0;
+    menaces.push({
+      gravite: tours <= 3 ? 'critique' : 'attention', icone: '🌾',
+      titre: `Nourriture en baisse (${rev.nourriture}/tour)`,
+      texte: tours > 0 ? `Famine dans ${tours} tour(s) au rythme actuel.` : 'Famine imminente : achetez du grain ou démobilisez.',
+    });
+  }
+  if (rev.or < 0) {
+    const tours = n.or > 0 ? Math.ceil(n.or / -rev.or) : 0;
+    menaces.push({
+      gravite: tours <= 3 ? 'critique' : 'attention', icone: '💰',
+      titre: `Trésor en baisse (${rev.or}/tour)`,
+      texte: tours > 0 ? `Vos caisses seront vides dans ${tours} tour(s).` : 'Caisses vides : démobilisez ou vendez au marché.',
+    });
+  }
+  if (n.dette >= DETTE_MAX * 0.6) {
+    menaces.push({
+      gravite: n.dette >= DETTE_MAX * 0.8 ? 'critique' : 'attention', icone: '⛓️',
+      titre: `Dette de ${n.dette} 💰`,
+      texte: `Intérêts : −${rev.interets}/tour. Au-delà de ${DETTE_MAX}, vos créanciers vous ruinent.`,
+    });
+  }
+  if (rev.detail.bloque) {
+    menaces.push({
+      gravite: 'critique', icone: '⛔', titre: 'Blocus naval !',
+      texte: 'Vos routes maritimes sont coupées et vos ports affaiblis. Détruisez la flotte ennemie ou faites la paix.',
+    });
+  }
+
+  // --- Opportunités ---
+  // Cités-états annexables au contact de mon territoire
+  for (const p of G.provinces) {
+    if (!p.citeEtat || p.proprietaire !== -1) continue;
+    if (!voisinsHex(p.col, p.row).some(i => G.provinces[i].proprietaire === nid)) continue;
+    const cout = coutAnnexionCite(p);
+    opportunites.push({
+      icone: '🏛️', titre: `Annexer ${p.nom}`,
+      texte: `Cité-état à votre frontière — ${cout} 💰${n.or >= cout ? ' (vous pouvez payer)' : ` (il vous manque ${cout - Math.floor(n.or)} 💰)`}`,
+      pret: n.or >= cout, cible: { type: 'province', id: p.id },
+    });
+  }
+  // Provinces indépendantes faibles au contact
+  let independantes = 0;
+  for (const p of miennes) {
+    for (const vid of voisinsHex(p.col, p.row)) {
+      const v = G.provinces[vid];
+      if (v.proprietaire === -1 && !v.citeEtat && v.terrain !== 'eau' && v.troupes < p.troupes) independantes++;
+    }
+  }
+  if (independantes > 0) {
+    opportunites.push({
+      icone: '🚩', titre: `${independantes} province(s) indépendante(s) à prendre`,
+      texte: 'Vos armées frontalières sont plus fortes que leurs garnisons : attaquez sans déclarer de guerre.',
+      pret: true,
+    });
+  }
+  // Nouvelle ère à portée
+  const prochaine = ERES[n.ere + 1];
+  if (prochaine) {
+    const manque = seuilEre(n.ere + 1) - n.science;
+    if (manque <= rev.science * 5 && rev.science > 0) {
+      opportunites.push({
+        icone: prochaine.icone, titre: `Ère « ${prochaine.nom} » dans ${Math.max(1, Math.ceil(manque / rev.science))} tour(s)`,
+        texte: `Vos unités deviendront des ${prochaine.unite} (puissance ×${prochaine.puissance}).`,
+        pret: manque <= 0,
+      });
+    }
+  }
+  // Doctrine non choisie
+  if (!n.doctrine) {
+    opportunites.push({
+      icone: '📜', titre: 'Aucune doctrine nationale',
+      texte: 'Choisissez une doctrine (Techno) : +20 % d\'or, +25 % de science, de nourriture ou des recrues moins chères.',
+      pret: true, ecran: 'techno',
+    });
+  }
+  // Voisins avec qui commercer
+  for (const autre of G.nations) {
+    if (!autre.vivante || autre.id === nid || aAccord(nid, autre.id) || enGuerre(nid, autre.id)) continue;
+    if (n.relations[autre.id] >= 20 && nationsEnContact(nid, autre.id)) {
+      opportunites.push({
+        icone: '🤝', titre: `Accord commercial avec ${autre.nom}`,
+        texte: `Relations à ${n.relations[autre.id]} : ils accepteraient. +8 à +18 💰/tour.`,
+        pret: true, couleur: autre.couleur, cible: { type: 'nation', id: autre.id },
+      });
+    }
+  }
+  // Emplacements de construction libres
+  const libres = miennes.reduce((s, p) => s + Math.max(0, emplacementsMax(p) - emplacementsUtilises(p)), 0);
+  if (libres > 0 && n.or > 40) {
+    opportunites.push({
+      icone: '🏗️', titre: `${libres} emplacement(s) de construction libre(s)`,
+      texte: `Vous avez ${Math.floor(n.or)} 💰 : fermes, marchés, mines et ports augmentent vos revenus à chaque tour.`,
+      pret: true,
+    });
+  }
+
+  const ordre = { critique: 0, attention: 1, bonne: 2 };
+  menaces.sort((a, b) => ordre[a.gravite] - ordre[b.gravite]);
+  opportunites.sort((a, b) => (b.pret ? 1 : 0) - (a.pret ? 1 : 0));
+
+  return {
+    rev,
+    provinces: miennes.length,
+    pop: rev.popTotale,
+    troupes: rev.detail.troupes,
+    capitale: miennes.find(p => p.capitale),
+    menaces, opportunites,
+  };
 }
 
 // ---------- Accès pratiques ----------
@@ -1321,6 +1518,17 @@ function resoudreAttaque(source, cible, multAtt = 1) {
     c.aBouge = true;
     const etaitCapitale = c.capitale;
     c.capitale = false;
+    if (ancienProprio === G.joueur) {
+      alerte('critique', '🔥', `${nomCible} est tombée !`,
+        `${att.nom} s'empare de ${etaitCapitale ? 'votre capitale' : 'votre province'}. ` +
+        `Il vous reste ${provincesDe(G.joueur).length} province(s). Reprenez-la avant qu'ils ne s'y fortifient.`,
+        { type: 'province', id: c.id });
+    } else if (s.proprietaire === G.joueur) {
+      alerte('bonne', '🚩', `${nomCible} est conquise`,
+        `Votre armée tient ${nomCible}${ancienProprio >= 0 ? ' (prise à ' + nation(ancienProprio).nom + ')' : ''}. ` +
+        'Vous possédez désormais ' + provincesDe(G.joueur).length + ' provinces.',
+        { type: 'province', id: c.id });
+    }
     if (ancienProprio >= 0) {
       modifierRelation(ancienProprio, s.proprietaire, -20);
       if (etaitCapitale) {
@@ -1473,6 +1681,20 @@ function declarerGuerre(a, b) {
   bougerFaction(a, 'nobles', 8);     // la noblesse aime la gloire
   bougerFaction(a, 'marchands', -8); // les marchands détestent la guerre
   journal(`⚡ ${nation(a).nom} déclare la guerre à ${nation(b).nom} !`);
+  if (b === G.joueur) {
+    const menace = puissanceMilitaire(a);
+    const mienne = puissanceMilitaire(b);
+    alerte('critique', '⚔️', `${nation(a).nom} vous déclare la guerre !`,
+      `Force ennemie ${Math.round(menace)} contre ${Math.round(mienne)} pour vous — ` +
+      (menace > mienne * 1.3 ? 'ils sont plus forts : levez des troupes ou cherchez un allié.'
+        : menace * 1.3 < mienne ? 'vous dominez : leurs provinces frontalières sont à prendre.'
+        : 'les forces sont comparables.'),
+      { type: 'nation', id: a });
+  } else if (a === G.joueur) {
+    alerte('attention', '⚔️', `Vous déclarez la guerre à ${nation(b).nom}`,
+      'Vos marchands désapprouvent, votre noblesse applaudit. La stabilité baisse tant que dure le conflit.',
+      { type: 'nation', id: b });
+  }
   // Les alliés du défenseur rejoignent la guerre
   for (const allie of [...nation(b).alliances]) {
     if (allie !== a && !enGuerre(a, allie) && nation(allie).vivante) {
@@ -1634,7 +1856,11 @@ function verifierEre(nid) {
   while (n.ere < ERES.length - 1 && n.science >= seuilEre(n.ere + 1)) {
     n.ere++;
     journal(`${ERES[n.ere].icone} ${n.nom} entre dans l'${ERES[n.ere].nom.toLowerCase().startsWith('è') ? '' : 'ère : '}${ERES[n.ere].nom} !`);
-    if (n.joueur) G.message = { titre: 'Nouvelle ère !', texte: `Votre nation entre dans l'ère « ${ERES[n.ere].nom} ». Vos unités deviennent des ${ERES[n.ere].unite} (puissance ×${ERES[n.ere].puissance}).` };
+    if (n.joueur) {
+      G.message = { titre: 'Nouvelle ère !', texte: `Votre nation entre dans l'ère « ${ERES[n.ere].nom} ». Vos unités deviennent des ${ERES[n.ere].unite} (puissance ×${ERES[n.ere].puissance}).` };
+      alerte('bonne', ERES[n.ere].icone, `Ère ${ERES[n.ere].nom} atteinte !`,
+        `Vos unités deviennent des ${ERES[n.ere].unite} (puissance ×${ERES[n.ere].puissance}). Recrutez pour renouveler vos armées.`);
+    }
   }
 }
 
@@ -1714,7 +1940,12 @@ function finDeTour() {
       if (miennes.length) { retirerUnites(pick(miennes), 1); }
       const peuplees = provincesDe(n.id).filter(p => p.pop > 2);
       for (let i = 0; i < 2 && peuplees.length; i++) pick(peuplees).pop--;
-      if (n.joueur) evenementsTour.push('⚠️ Famine ! Votre peuple meurt et vos soldats désertent.');
+      if (n.joueur) {
+        evenementsTour.push('⚠️ Famine ! Votre peuple meurt et vos soldats désertent.');
+        alerte('critique', '🌾', 'Famine dans le royaume !',
+          'Vos réserves de nourriture sont épuisées : le peuple meurt, les soldats désertent et la stabilité s\'effondre. ' +
+          'Construisez des fermes, achetez du grain au marché ou démobilisez des troupes.');
+      }
     } else {
       // Croissance démographique : le peuple nourri prospère
       const tauxCroissance = n.doctrine === 'agraire' ? 0.65 : 0.5;
@@ -1746,6 +1977,12 @@ function finDeTour() {
         p.armee = { inf: 4 + rand(4), choc: 0, siege: 0 };
         majTroupes(p);
         journal(`🔥 Révolte à ${p.nom} ! La province fait sécession de ${n.nom}.`);
+        if (n.joueur) {
+          alerte('critique', '🔥', `Révolte à ${p.nom} !`,
+            'La province fait sécession : votre stabilité est trop basse. ' +
+            'Organisez des fêtes, importez du luxe ou faites la paix pour calmer le royaume.',
+            { type: 'province', id: p.id });
+        }
         verifierElimination(n.id);
       }
     }
@@ -2080,6 +2317,7 @@ function migrerSauvegarde() {
   // Dimensions de la carte (les anciennes parties étaient en 16×12)
   MAP_W = G.mapW || 16;
   MAP_H = G.mapH || 12;
+  if (!G.alertes) G.alertes = [];
   if (!G.mapW) { G.mapW = MAP_W; G.mapH = MAP_H; }
   if (!G.marche) {
     G.marche = Object.fromEntries(Object.entries(MARCHANDISES).map(([k, m]) => [k, { prix: m.prixBase }]));

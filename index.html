@@ -32,15 +32,24 @@
       <button onclick="ouvrirAide()" title="Aide">❓</button>
     </div>
 
+    <!-- Bandeau d'alerte critique -->
+    <div id="bandeau-alerte"></div>
+
+    <!-- Rapport de fin de tour -->
+    <div id="rapport-tour"></div>
+
+    <!-- Hub : où j'en suis en un coup d'œil -->
+    <div id="hub"></div>
+
     <!-- Panneau province (bas d'écran) -->
     <div id="panneau-province"></div>
 
     <!-- Barre d'actions -->
     <div id="barre-bas">
+      <button class="btn-barre btn-hub" onclick="ouvrirHub()">🛡️<span>Royaume</span></button>
       <button class="btn-barre" onclick="ouvrirDiplomatie()">🕊️<span>Diplomatie</span></button>
       <button class="btn-barre" onclick="ouvrirCommerce()">📦<span>Commerce</span></button>
       <button class="btn-barre" onclick="ouvrirTechnologie()">🔬<span>Techno</span></button>
-      <button class="btn-barre" onclick="ouvrirJournal()">📜<span>Journal</span></button>
       <button class="btn-barre btn-fin-tour" onclick="uiFinDeTour()">⏭️<span>Fin du tour</span></button>
     </div>
   </div>
