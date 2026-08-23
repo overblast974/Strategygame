@@ -161,7 +161,10 @@ button { font-family: inherit; cursor: pointer; }
   opacity: 0; transform: translateY(16px); pointer-events: none;
   transition: opacity 0.25s, transform 0.25s;
 }
-#rapport-tour.visible { opacity: 1; transform: translateY(0); pointer-events: auto; }
+#rapport-tour.visible { opacity: 1; transform: translateY(0); }
+/* Le rapport se laisse traverser : seuls ses boutons captent le tap, la carte
+   reste jouable en dessous. */
+#rapport-tour.visible button { pointer-events: auto; }
 .rt-entete { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .rt-entete b { font-size: 13px; color: #ffe9a0; }
 .rt-entete small { font-size: 11px; color: #9db2c7; }
@@ -500,3 +503,17 @@ button { font-family: inherit; cursor: pointer; }
   z-index: 30;
 }
 #toast.visible { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* ---------- Cibles au contact (panneau de province) ---------- */
+.pp-cibles { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.btn-cible {
+  display: flex; align-items: center; gap: 9px;
+  text-align: left; padding: 9px 11px; width: 100%;
+}
+.bc-nom { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; font-size: 13.5px; }
+.bc-nom small { font-size: 11px; color: #9db2c7; font-weight: 400; }
+.btn-cible.attaquable { background: #5c2018; border-color: #b8452f; }
+.btn-cible.attaquable:active { background: #7a2b20; }
+.btn-cible.guerre { background: #5e3d14; border-color: #c9962f; }
+.btn-cible.guerre:active { background: #7a5219; }
+.btn-cible:disabled { opacity: 0.5; }

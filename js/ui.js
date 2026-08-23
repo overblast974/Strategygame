@@ -623,18 +623,18 @@ function gererTap(px, py) {
       ouvrirAttaque(UI.selection, pid);
       return;
     }
-    if (p.proprietaire >= 0 && !enGuerre(G.joueur, p.proprietaire)) {
-      ouvrirConfirmation(
-        `Déclarer la guerre ?`,
-        `Attaquer ${p.nom} exige de déclarer la guerre à ${nation(p.proprietaire).nom}. Leurs alliés pourraient s'en mêler.`,
-        () => {
-          const r = declarerGuerre(G.joueur, p.proprietaire);
-          if (!r.ok) toast(r.raison || 'Impossible');
-          majTout();
-        });
+    // Attaque impossible : toujours dire pourquoi plutôt que de sélectionner
+    // la case en silence — sinon le joueur croit que l'attaque ne marche plus.
+    const r = verifierAttaque(UI.selection, pid);
+    if (r.guerreRequise !== undefined) {
+      uiDeclarerGuerreDepuis(UI.selection, pid);
       return;
     }
-    if (sel.aBouge) { toast('Cette armée a déjà agi ce tour.'); return; }
+    if (!r.ok) {
+      toast(r.raison);
+      afficherPanneauProvince(UI.selection);
+      return;
+    }
   }
 
   // Sinon : sélectionner
@@ -665,6 +665,69 @@ function changerModeCarte(mode) {
 }
 
 // ---------- Panneaux ----------
+// Liste les provinces voisines et l'action possible sur chacune : attaquer,
+// déclarer la guerre, ou y déplacer des troupes. Doublon volontaire du geste
+// tactile, qui est peu précis sur une carte à 10 000 cases.
+function voisinesJouables(p) {
+  const cibles = [];
+  const amies = [];
+  for (const vid of voisinsHex(p.col, p.row)) {
+    const v = G.provinces[vid];
+    if (v.terrain === 'eau') continue;
+    if (v.proprietaire === G.joueur) { amies.push(v); continue; }
+    cibles.push(v);
+  }
+  if (!cibles.length && !amies.length) return '';
+
+  let html = '';
+  if (cibles.length) {
+    html += `<div class="pp-emplacements">⚔️ Au contact :</div><div class="pp-cibles">`;
+    for (const v of cibles) {
+      const r = verifierAttaque(p.id, v.id);
+      const qui = v.proprietaire >= 0 ? nation(v.proprietaire).nom : (v.citeEtat ? 'Cité-état' : 'Indépendante');
+      const coul = v.proprietaire >= 0 ? nation(v.proprietaire).couleur : '#777';
+      const defense = `${v.troupes} ⚔️`;
+      if (r.ok) {
+        html += `<button class="btn btn-cible attaquable" onclick="ouvrirAttaque(${p.id},${v.id})">
+          <span class="pastille" style="background:${coul}"></span>
+          <span class="bc-nom">⚔️ ${v.nom}<small>${qui} · ${defense}</small></span></button>`;
+      } else if (r.guerreRequise !== undefined) {
+        html += `<button class="btn btn-cible guerre" onclick="uiDeclarerGuerreDepuis(${p.id},${v.id})">
+          <span class="pastille" style="background:${coul}"></span>
+          <span class="bc-nom">⚡ Déclarer la guerre<small>${v.nom} · ${qui} · ${defense}</small></span></button>`;
+      } else {
+        html += `<button class="btn btn-cible" disabled>
+          <span class="pastille" style="background:${coul}"></span>
+          <span class="bc-nom">${v.nom}<small>${r.raison}</small></span></button>`;
+      }
+    }
+    html += `</div>`;
+  }
+  if (amies.length && p.troupes > 1 && !p.aBouge) {
+    html += `<div class="pp-emplacements">➡️ Envoyer des troupes vers :</div><div class="pp-cibles">`;
+    for (const v of amies) {
+      html += `<button class="btn btn-cible" onclick="ouvrirDeplacement(${p.id},${v.id})">
+        <span class="bc-nom">➡️ ${v.nom}<small>${v.troupes} ⚔️ sur place</small></span></button>`;
+    }
+    html += `</div>`;
+  }
+  return html;
+}
+
+// Déclarer la guerre puis enchaîner directement sur l'assaut
+function uiDeclarerGuerreDepuis(source, cible) {
+  const c = G.provinces[cible];
+  ouvrirConfirmation('Déclarer la guerre ?',
+    `Attaquer ${c.nom} exige de déclarer la guerre à ${nation(c.proprietaire).nom}. Leurs alliés pourraient s'en mêler.`,
+    () => {
+      const r = declarerGuerre(G.joueur, c.proprietaire);
+      if (!r.ok) { toast(r.raison || 'Impossible'); majTout(); return; }
+      majTout();
+      if (peutAttaquer(source, cible)) ouvrirAttaque(source, cible);
+      else afficherPanneauProvince(source);
+    });
+}
+
 function afficherPanneauProvince(pid) {
   const p = G.provinces[pid];
   const el = document.getElementById('panneau-province');
@@ -696,6 +759,11 @@ function afficherPanneauProvince(pid) {
 
   if (monTour) {
     const moi = nation(G.joueur);
+
+    // Cibles au contact en tête : attaquer prime sur construire, et le geste
+    // tactile est peu précis sur une carte à 10 000 cases
+    html += voisinesJouables(p);
+
     html += `<div class="pp-recrues">`;
     for (const [type, def] of Object.entries(TYPES_UNITES)) {
       const c = def.cout;

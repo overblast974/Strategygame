@@ -1474,6 +1474,30 @@ function organiserFetes(nid) {
 }
 
 // ---------- Combat & mouvement ----------
+// Pourquoi cette attaque est-elle impossible ? (message destiné au joueur)
+// Sans cela, un tap sur une case ennemie échoue en silence et donne
+// l'impression que l'attaque ne marche plus.
+function verifierAttaque(source, cible) {
+  const s = G.provinces[source], c = G.provinces[cible];
+  if (!s || !c) return { ok: false, raison: 'Cible invalide' };
+  if (s.proprietaire !== G.joueur) return { ok: false, raison: 'Cette province ne vous appartient pas' };
+  if (c.terrain === 'eau') return { ok: false, raison: 'On n\'attaque pas la mer' };
+  if (s.proprietaire === c.proprietaire) return { ok: false, raison: 'Cette province est déjà à vous' };
+  if (!voisinsHex(s.col, s.row).includes(cible)) return { ok: false, raison: 'Province non adjacente' };
+  if (s.aBouge) return { ok: false, raison: `L'armée de ${s.nom} a déjà agi ce tour` };
+  if (s.troupes < 2) {
+    return { ok: false, raison: `${s.nom} n'a que ${s.troupes} soldat(s) : il en faut au moins 2 (un reste en garnison). Recrutez sur place ou amenez des troupes.` };
+  }
+  if (c.proprietaire >= 0) {
+    if (estVassal(c.proprietaire, s.proprietaire)) return { ok: false, raison: `${nation(c.proprietaire).nom} est votre vassal` };
+    if (estVassal(s.proprietaire, c.proprietaire)) return { ok: false, raison: `Vous êtes vassal de ${nation(c.proprietaire).nom}` };
+    if (!enGuerre(s.proprietaire, c.proprietaire)) {
+      return { ok: false, guerreRequise: c.proprietaire, raison: `Il faut d'abord déclarer la guerre à ${nation(c.proprietaire).nom}` };
+    }
+  }
+  return { ok: true };
+}
+
 function peutAttaquer(source, cible) {
   const s = G.provinces[source], c = G.provinces[cible];
   if (s.proprietaire === c.proprietaire) return false;
