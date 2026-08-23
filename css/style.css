@@ -556,3 +556,13 @@ button { font-family: inherit; cursor: pointer; }
 .fa-effet.bon { color: #7ec97e; }
 .fa-effet.mauvais { color: #ff9a80; }
 .fa-veut { display: block; font-size: 10.5px; color: #6f8499; margin-top: 3px; line-height: 1.35; }
+.fa-val i { font-size: 11px; font-style: normal; margin-left: 3px; }
+.fa-val i.pos { color: #7ec97e; }
+.fa-val i.neg { color: #ff8a7a; }
+.fa-causes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.fa-causes span {
+  font-size: 10.5px; padding: 2px 7px; border-radius: 20px;
+  background: #0f1721; color: #9db2c7;
+}
+.fa-causes .pos { color: #7ec97e; }
+.fa-causes .neg { color: #ff9a80; }

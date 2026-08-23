@@ -1769,14 +1769,25 @@ function hubRoyaume(moi, b, rev) {
       const effet = humeur > 0 ? `<span class="fa-effet bon">${def.content}</span>`
         : humeur < 0 ? `<span class="fa-effet mauvais">${def.fache}</span>`
         : `<span class="fa-effet">sans effet — ${SEUIL_FACTION_CONTENTE - v} points pour obtenir « ${def.content} »</span>`;
+      // Ce qui a fait bouger la jauge au dernier tour, poste par poste
+      const raisons = (moi.factionsRaisons || {})[f] || [];
+      const tendance = raisons.reduce((t, r) => t + r.delta, 0);
+      const causes = raisons.length
+        ? `<div class="fa-causes">${raisons.map(r =>
+            `<span class="${r.delta > 0 ? 'pos' : 'neg'}">${r.delta > 0 ? '+' : ''}${r.delta} ${r.texte}</span>`).join('')}</div>`
+        : '<div class="fa-causes"><span>rien ne les a fait bouger ce tour</span></div>';
       return `<div class="faction ${humeur < 0 ? 'fachee' : humeur > 0 ? 'contente' : ''}">
-        <div class="fa-tete"><b>${def.nom}</b><span class="fa-val" style="color:${coul}">${v}${v <= 12 ? ' ⚠️ révolte !' : ''}</span></div>
+        <div class="fa-tete"><b>${def.nom}</b>
+          <span class="fa-val" style="color:${coul}">${v}
+            ${tendance ? `<i class="${tendance > 0 ? 'pos' : 'neg'}">${tendance > 0 ? '▲+' : '▼'}${tendance}</i>` : ''}
+            ${v <= 12 ? ' ⚠️ révolte !' : ''}</span></div>
         <div class="fa-jauge">
           <span class="fa-remplissage" style="width:${v}%;background:${coul}"></span>
           <span class="fa-seuil" style="left:${SEUIL_FACTION_FACHEE}%"></span>
           <span class="fa-seuil" style="left:${SEUIL_FACTION_CONTENTE}%"></span>
         </div>
         ${effet}
+        ${causes}
         <small class="fa-veut">Veut ${def.veut}</small>
       </div>`;
     }).join('')}
