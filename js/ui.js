@@ -17,7 +17,6 @@ const UI = {
   cam: { x: 0, y: 0, zoom: 1 },
   shake: 0,
   temps: 0,
-  nomsVisibles: true,
   hexSize: 42,
   selection: -1,
   pointers: new Map(),
@@ -92,6 +91,10 @@ function areteVers(pts, cVoisin) {
   return [tri[0].pt, tri[1].pt];
 }
 
+// Au-delà de ce nombre de soldats, une armée compte assez pour rester
+// visible en vue large ; en deçà, c'est une garnison de détail.
+const SEUIL_GRANDE_ARMEE = 5;
+
 const DECOR_TERRAIN = { foret: '🌲', montagne: '⛰️', desert: '🌵', colline: '🌿', toundra: '❄️' };
 
 // Cache de textures pour les textes répétés (décor, gisements) : indispensable
@@ -126,12 +129,12 @@ function initPixi() {
 
   // Couches (ordre de dessin)
   for (const nom of ['fond', 'eau', 'vagues', 'terrain', 'politique', 'frontieres', 'routes', 'decor',
-                     'gisements', 'surbrillance', 'unites', 'icones', 'noms', 'fx']) {
+                     'gisements', 'surbrillance', 'unites', 'unitesMineures', 'icones', 'noms', 'fx']) {
     UI.couches[nom] = new PIXI.Container();
     UI.monde.addChild(UI.couches[nom]);
   }
   // Graphics partagés
-  for (const nom of ['eau', 'vagues', 'terrain', 'politique', 'frontieres', 'mien', 'menace', 'routes', 'cibles', 'selection', 'unites']) {
+  for (const nom of ['eau', 'vagues', 'terrain', 'politique', 'frontieres', 'mien', 'menace', 'routes', 'cibles', 'selection', 'unites', 'unitesMineures']) {
     UI.gfx[nom] = new PIXI.Graphics();
   }
   UI.couches.routes.addChild(UI.gfx.routes);
@@ -145,6 +148,7 @@ function initPixi() {
   UI.couches.surbrillance.addChild(UI.gfx.cibles);
   UI.couches.surbrillance.addChild(UI.gfx.selection);
   UI.couches.unites.addChild(UI.gfx.unites);
+  UI.couches.unitesMineures.addChild(UI.gfx.unitesMineures);
 
   UI.app.ticker.add(() => tick());
 }
@@ -309,10 +313,8 @@ function dessiner() {
   // on les épaissit d'autant pour qu'ils gardent leur épaisseur à l'écran.
   const k = Math.min(7, Math.max(1, 1 / Math.max(0.06, zoom)));
 
-  // Décor et gisements disparaissent dès qu'on s'éloigne
-  UI.couches.decor.visible = lod === 'proche';
-  UI.couches.gisements.visible = lod === 'proche' && UI.modeCarte === 'ressources';
-  UI.couches.icones.visible = lod !== 'loin';
+  // Les couches de détail ne sont plus allumées d'un coup : leur opacité est
+  // interpolée à chaque image dans tick(), pour que le pincement soit fluide.
 
   // Cibles valides depuis la sélection
   const selection = UI.selection >= 0 ? G.provinces[UI.selection] : null;
@@ -333,6 +335,7 @@ function dessiner() {
   const gCib = UI.gfx.cibles; gCib.clear();
   const gSel = UI.gfx.selection; gSel.clear();
   const gUni = UI.gfx.unites; gUni.clear();
+  const gUniMin = UI.gfx.unitesMineures; gUniMin.clear();
 
   // Opacité politique selon le mode de carte
   const modeC = UI.modeCarte;
@@ -427,26 +430,29 @@ function dessiner() {
       icoTxt.visible = false;
     }
 
-    // Pions de troupes : au loin on n'en montre plus aucun (c'était un océan
-    // de pastilles noires), à mi-distance seulement les armées qui comptent.
+    // Pions de troupes. Les grandes armées et les petites garnisons vivent
+    // dans deux couches distinctes : chacune apparaît en fondu à son propre
+    // seuil de zoom (voir tick), au lieu de surgir d'un coup.
     let effTxt = UI.pool.effectifs.get(p.id);
-    const seuilPion = lod === 'loin' ? Infinity : lod === 'moyen' ? 5 : 1;
-    if (p.troupes >= seuilPion) {
+    if (p.troupes > 0) {
+      const grand = p.troupes >= SEUIL_GRANDE_ARMEE;
+      const g = grand ? gUni : gUniMin;
+      const couche = grand ? UI.couches.unites : UI.couches.unitesMineures;
       const grise = p.proprietaire === G.joueur && p.aBouge;
-      gUni.lineStyle(2, p.proprietaire >= 0 ? couleurNum(nation(p.proprietaire).couleur) : 0x999999);
-      gUni.beginFill(grise ? 0x4a525c : 0x141b24);
-      gUni.drawCircle(c.x, c.y + s * 0.08, s * 0.3);
-      gUni.endFill();
-      gUni.lineStyle(0);
+      g.lineStyle(2, p.proprietaire >= 0 ? couleurNum(nation(p.proprietaire).couleur) : 0x999999);
+      g.beginFill(grise ? 0x4a525c : 0x141b24);
+      g.drawCircle(c.x, c.y + s * 0.08, s * 0.3);
+      g.endFill();
+      g.lineStyle(0);
       if (!effTxt) {
         effTxt = new PIXI.Text('', {
           fontFamily: 'sans-serif', fontSize: s * 0.32, fontWeight: 'bold', fill: 0xffffff,
         });
         effTxt.anchor.set(0.5);
         effTxt.position.set(c.x, c.y + s * 0.1);
-        UI.couches.unites.addChild(effTxt);
         UI.pool.effectifs.set(p.id, effTxt);
       }
+      if (effTxt.parent !== couche) couche.addChild(effTxt);
       effTxt.text = String(p.troupes);
       effTxt.style.fill = grise ? 0x9aa4ae : 0xffffff;
       effTxt.visible = true;
@@ -485,7 +491,6 @@ function dessiner() {
   // face à des troupes ennemies. C'est la seule chose qui doit se voir de loin.
   const gMen = UI.gfx.menace; gMen.clear();
   if (mesEnnemis.size) {
-    const rayon = s * (lod === 'loin' ? 0.75 : 0.42);
     for (const p of G.provinces) {
       if (p.proprietaire !== G.joueur) continue;
       let pression = 0;
@@ -495,11 +500,21 @@ function dessiner() {
       }
       if (pression === 0) continue;
       const c = hexCentre(p.col, p.row);
-      const grave = pression >= p.troupes * 1.5;
-      gMen.lineStyle(2.5 * k, 0x2a0d09, 0.8);
-      gMen.beginFill(grave ? 0xff2d1a : 0xff8c42, 0.9);
-      gMen.drawCircle(c.x, c.y - s * 0.05, rayon);
-      gMen.endFill();
+      const grave = pression >= Math.max(1, p.troupes) * 1.5;
+      const coul = grave ? 0xff2d1a : 0xff8c42;
+      // Un liseré rouge en pointillés épouse la province menacée : il ne
+      // recouvre pas la pastille de troupes (on comprend donc que c'est la
+      // PROVINCE qui est en danger, pas son effectif) et les tirets le
+      // distinguent du trait plein de la sélection. Le même motif sert à
+      // toutes les distances — en s'épaississant avec le dézoom, il devient
+      // naturellement une marque pleine en vue mondiale, sans bascule.
+      const pts = hexSommets(c.x, c.y, s - 3 * k);
+      gMen.lineStyle(4 * k, coul, grave ? 1 : 0.85);
+      for (let i = 0; i < 6; i += 2) {
+        const a1 = pts[i], a2 = pts[(i + 1) % 6];
+        gMen.moveTo(a1[0], a1[1]);
+        gMen.lineTo(a2[0], a2[1]);
+      }
       gMen.lineStyle(0);
     }
   }
@@ -525,6 +540,31 @@ function dessiner() {
   }
 }
 
+// Transition douce entre deux valeurs : 0 avant `bas`, 1 après `haut`,
+// avec une courbe adoucie entre les deux (pas de bascule brutale).
+function fondu(x, bas, haut) {
+  const t = clamp((x - bas) / (haut - bas), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+// Chaque couche de détail apparaît en fondu à son propre seuil de zoom :
+// les grandes armées d'abord, puis les garnisons, le décor et les noms.
+function majOpacitesZoom() {
+  const z = UI.cam.zoom;
+  const regle = (couche, bas, haut) => {
+    const a = fondu(z, bas, haut);
+    couche.alpha = a;
+    couche.visible = a > 0.01;
+  };
+  regle(UI.couches.unites, 0.20, 0.36);          // armées qui comptent
+  regle(UI.couches.unitesMineures, 0.42, 0.68);  // petites garnisons
+  regle(UI.couches.icones, 0.26, 0.42);          // couronnes, forts, ports
+  regle(UI.couches.decor, 0.52, 0.74);           // forêts, montagnes
+  regle(UI.couches.noms, 0.60, 0.80);
+  UI.couches.gisements.visible = UI.modeCarte === 'ressources' && UI.couches.decor.visible;
+  UI.couches.gisements.alpha = UI.couches.decor.alpha;
+}
+
 // ---------- Boucle d'animation ----------
 function tick() {
   if (!UI.app) return;
@@ -548,6 +588,7 @@ function tick() {
   if (UI.ecran === 'jeu' && G) {
     const ratio = UI.cam.zoom / (UI.zoomDessine || UI.cam.zoom);
     if (niveauDetail(UI.cam.zoom) !== UI.lodDessine || ratio > 1.2 || ratio < 0.83) dessiner();
+    majOpacitesZoom();
   }
 
   // Pulsations
@@ -556,13 +597,9 @@ function tick() {
   UI.gfx.vagues.alpha = 0.5 + 0.5 * Math.sin(UI.temps * 1.2);
   UI.gfx.menace.alpha = 0.7 + 0.3 * Math.sin(UI.temps * 3.5);
 
-  // Noms visibles selon le zoom (étiquettes créées à la demande)
-  const voulu = UI.cam.zoom > 0.75;
-  if (voulu !== UI.nomsVisibles) {
-    UI.nomsVisibles = voulu;
-    UI.couches.noms.visible = voulu;
-  }
-  if (voulu && UI.ecran === 'jeu' && G) majNomsVisibles();
+  // Les étiquettes de nom sont créées à la demande dès qu'elles commencent
+  // à apparaître (leur opacité est gérée par majOpacitesZoom)
+  if (UI.cam.zoom > 0.58 && UI.ecran === 'jeu' && G) majNomsVisibles();
 
   // Particules
   if (UI.particules.length) {
@@ -825,6 +862,24 @@ function afficherPanneauProvince(pid) {
 
   if (monTour) {
     const moi = nation(G.joueur);
+
+    // Avertissement si des troupes ennemies sont massées en face
+    let pression = 0, assaillants = new Set();
+    for (const vid of voisinsHex(p.col, p.row)) {
+      const v = G.provinces[vid];
+      if (v.proprietaire >= 0 && v.proprietaire !== G.joueur && enGuerre(G.joueur, v.proprietaire)) {
+        pression += v.troupes;
+        assaillants.add(nation(v.proprietaire).nom);
+      }
+    }
+    if (pression > 0) {
+      const grave = pression >= Math.max(1, p.troupes) * 1.5;
+      html += `<div class="pp-menace ${grave ? 'grave' : ''}">
+        <b>${grave ? '🚨' : '⚠️'} Province menacée</b>
+        <small>${pression} soldats ${[...assaillants].join(' et ')} massés en face, contre ${p.troupes} ici.
+        ${grave ? 'Renforcez-la ou vous la perdrez.' : ''}</small>
+      </div>`;
+    }
 
     // Cibles au contact en tête : attaquer prime sur construire, et le geste
     // tactile est peu précis sur une carte à 10 000 cases
@@ -1952,6 +2007,8 @@ function ouvrirAide() {
     🛡️ Le bouton <b>Royaume</b> (ou la barre du haut) ouvre votre tableau de bord : forces, <b>menaces</b>, <b>opportunités</b> et le détail de chaque pièce d'or gagnée.<br>
     🔔 La <b>cloche</b> garde les événements importants : guerre déclarée, province perdue, famine. Une pastille rouge = à lire.<br>
     ✨ Votre royaume est cerné d'un <b>liseré doré</b> sur la carte ; vos frontières avec un ennemi en guerre virent au <b>rouge</b>.<br>
+    🚨 Un <b>pointillé rouge</b> autour d'une de vos provinces signale des troupes ennemies massées juste en face — orange si vous tenez le choc, rouge vif si vous êtes en infériorité. En vue mondiale, ces provinces deviennent de simples pastilles rouges.<br>
+    🔍 La carte se simplifie quand vous <b>dézoomez</b> : les garnisons, le décor puis les noms s'effacent progressivement pour ne laisser que les territoires et vos frontières.<br>
     🗺️ Les boutons en haut à gauche changent la <b>vue de la carte</b> : politique, terrain, gisements 📦, militaire.<br>
     👥 La <b>population</b> travaille (rendement max à 8+) et fournit les recrues. Démobilisez pour repeupler.<br>
     ⛏️ Un <b>gisement</b> produit 1/tour ; avec son bâtiment (mine, scierie…) : jusqu'à 7/tour.<br>
