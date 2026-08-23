@@ -170,7 +170,7 @@ function choisirDoctrine(nid, doctrine) {
   }
   n.doctrine = doctrine;
   n.doctrineTour = G.tour;
-  journal(`${DOCTRINES[doctrine].icone} ${n.nom} adopte la doctrine ${DOCTRINES[doctrine].nom.toLowerCase()}.`);
+  journal(`${DOCTRINES[doctrine].icone} ${n.nom} adopte la doctrine ${DOCTRINES[doctrine].nom.toLowerCase()}.`, n.id);
   return { ok: true };
 }
 
@@ -217,7 +217,7 @@ function vivreDynastie(nid, annees) {
   if (n.general) {
     n.general.age += annees;
     if (Math.random() < Math.max(0, (n.general.age - 55) * 0.012) * (annees / 10 + 0.4)) {
-      journal(`⚰️ Le vieux général ${n.general.nom} de ${n.nom} s'éteint.`);
+      journal(`⚰️ Le vieux général ${n.general.nom} ${deNom(n.nom)} s'éteint.`, n.id);
       n.general = null;
     }
   }
@@ -227,7 +227,7 @@ function vivreDynastie(nid, annees) {
       Math.random() < 0.12 * (annees / 10 + 0.4)) {
     const h = creerPersonnage(nid, 0);
     n.heritiers.push(h);
-    if (n.joueur) journal(`👶 Naissance à la cour : ${h.nom} rejoint la lignée.`);
+    if (n.joueur) journal(`👶 Naissance à la cour : ${h.nom} rejoint la lignée.`, n.id);
   }
 
   // Mort du souverain (l'âge ne pardonne pas)
@@ -238,7 +238,7 @@ function vivreDynastie(nid, annees) {
     if (majeurs.length > 0) {
       n.dirigeant = majeurs[0];
       n.heritiers = n.heritiers.filter(h => h !== majeurs[0]);
-      journal(`⚰️ ${defunt.nom} de ${n.nom} s'éteint à ${defunt.age} ans. ${n.dirigeant.nom} monte sur le trône.`);
+      journal(`⚰️ ${defunt.nom} ${deNom(n.nom)} s'éteint à ${defunt.age} ans. ${n.dirigeant.nom} monte sur le trône.`, n.id);
       if (n.joueur) {
         G.message = {
           titre: `⚰️ Mort de ${defunt.nom}`,
@@ -250,7 +250,7 @@ function vivreDynastie(nid, annees) {
       // Pas d'héritier majeur : crise de succession, un régent prend le pouvoir
       n.dirigeant = creerPersonnage(nid, 30 + rand(20));
       n.stabilite = clamp(n.stabilite - 15, 0, 100);
-      journal(`⚰️ ${defunt.nom} de ${n.nom} meurt sans héritier majeur ! ${n.dirigeant.nom} s'impose dans la crise.`);
+      journal(`⚰️ ${defunt.nom} ${deNom(n.nom)} meurt sans héritier majeur ! ${n.dirigeant.nom} s'impose dans la crise.`, n.id);
       if (n.joueur) {
         G.message = {
           titre: '⚠️ Crise de succession !',
@@ -285,7 +285,7 @@ function missionEspionnage(a, b, mission) {
     // Échec : l'espion est démasqué
     n.espions--;
     modifierRelation(a, b, mission === 'assassiner' ? -30 : -15);
-    journal(`🕵️ Un espion de ${n.nom} est démasqué chez ${cible.nom} !`);
+    journal(`🕵️ Un espion ${deNom(n.nom)} est démasqué chez ${cible.nom} !`, n.id);
     if (mission === 'assassiner' && !cible.joueur && Math.random() < 0.25) {
       declarerGuerre(b, a);
       return { ok: false, raison: `Votre assassin est pris ! ${cible.nom} répond par la guerre !` };
@@ -316,14 +316,14 @@ function missionEspionnage(a, b, mission) {
       p.armee = { inf: 5 + rand(4), choc: 0, siege: 0 };
       majTroupes(p);
       cible.stabilite = clamp(cible.stabilite - 8, 0, 100);
-      journal(`🔥 Révolte fomentée : ${p.nom} fait sécession de ${cible.nom} !`);
+      journal(`🔥 Révolte fomentée : ${p.nom} fait sécession ${deNom(cible.nom)} !`, cible.id);
       verifierElimination(b);
       return { ok: true, resultat: `${p.nom} s'est soulevée contre eux !` };
     }
     case 'assassiner': {
       if (!cible.heritiers.length) return { ok: true, resultat: 'Aucun héritier à éliminer…' };
       const h = cible.heritiers.splice(rand(cible.heritiers.length), 1)[0];
-      journal(`🗡️ ${h.nom}, héritier de ${cible.nom}, meurt dans des circonstances… troubles.`);
+      journal(`🗡️ ${h.nom}, héritier ${deNom(cible.nom)}, meurt dans des circonstances… troubles.`, cible.id);
       return { ok: true, resultat: `${h.nom} a été éliminé discrètement.` };
     }
   }
@@ -337,15 +337,53 @@ function bougerFaction(nid, faction, delta) {
   n.factions[faction] = clamp(n.factions[faction] + delta, 0, 100);
 }
 
+// Ce que chaque faction apporte — ou coûte — selon son humeur.
+// Sans effet mesurable, une jauge ne serait que de la décoration.
+const SEUIL_FACTION_CONTENTE = 70;
+const SEUIL_FACTION_FACHEE = 30;
+const EFFETS_FACTIONS = {
+  nobles: {
+    nom: '⚜️ Noblesse', veut: 'la gloire militaire : déclarez des guerres, remportez des batailles',
+    content: "+10 % de force d'attaque", fache: "−10 % de force d'attaque",
+  },
+  marchands: {
+    nom: '⚖️ Marchands', veut: 'la paix et le négoce : accords commerciaux, marchés, ports',
+    content: "+15 % d'or", fache: "−15 % d'or",
+  },
+  peuple: {
+    nom: '👥 Peuple', veut: 'du pain, du luxe et des fêtes : greniers pleins, biens de luxe',
+    content: '+1 stabilité par tour', fache: '−2 stabilité par tour',
+  },
+};
+
+// -1 fâchée, 0 neutre, +1 contente
+function humeurFaction(nid, faction) {
+  const n = nation(nid);
+  if (!n.factions) return 0;
+  const v = n.factions[faction];
+  return v >= SEUIL_FACTION_CONTENTE ? 1 : v <= SEUIL_FACTION_FACHEE ? -1 : 0;
+}
+
+// Multiplicateur appliqué à l'or (marchands) et à l'attaque (noblesse)
+function multFaction(nid, faction, ampleur) {
+  return 1 + humeurFaction(nid, faction) * ampleur;
+}
+
 // Vérifie la colère des factions (appelé chaque tour)
 function verifierFactions(nid) {
   const n = nation(nid);
   if (!n.factions) return null;
-  // Dérive douce vers 50
+  // Dérive : seuls les extrêmes reviennent vers le centre, pour que les
+  // humeurs intermédiaires durent et se voient au lieu de se lisser aussitôt.
   for (const f of Object.keys(n.factions)) {
-    if (n.factions[f] > 50) n.factions[f]--;
-    else if (n.factions[f] < 50) n.factions[f]++;
+    const v = n.factions[f];
+    if (v > 72) n.factions[f]--;
+    else if (v < 28) n.factions[f]++;
   }
+  // Le peuple satisfait apaise le royaume, le peuple affamé le mine
+  const humeurPeuple = humeurFaction(nid, 'peuple');
+  if (humeurPeuple > 0) n.stabilite = clamp(n.stabilite + 1, 0, 100);
+  else if (humeurPeuple < 0) n.stabilite = clamp(n.stabilite - 2, 0, 100);
   for (const [f, valeur] of Object.entries(n.factions)) {
     if (valeur <= 12) {
       // Révolte organisée !
@@ -360,7 +398,7 @@ function verifierFactions(nid) {
       }
       n.stabilite = clamp(n.stabilite - 10, 0, 100);
       const noms = { nobles: 'La noblesse', marchands: 'Les guildes marchandes', peuple: 'Le peuple' };
-      journal(`⚔️🔥 ${noms[f]} de ${n.nom} se soulève ! ${nb} provinces rejoignent la rébellion.`);
+      journal(`⚔️🔥 ${noms[f]} ${deNom(n.nom)} se soulève ! ${nb} provinces rejoignent la rébellion.`, n.id);
       verifierElimination(nid);
       return f;
     }
@@ -379,14 +417,14 @@ function nommerGeneral(nid, indexHeritier = -1) {
     n.heritiers.splice(indexHeritier, 1);
     n.general = h;
     n.general.victoires = 0;
-    journal(`⚔️ ${h.nom} de ${n.nom} renonce au trône et prend la tête des armées.`);
+    journal(`⚔️ ${h.nom} ${deNom(n.nom)} renonce au trône et prend la tête des armées.`, n.id);
   } else {
     if (n.or < 150) return { ok: false, raison: '150 💰 requis' };
     n.or -= 150;
     n.general = creerPersonnage(nid, 28 + rand(15));
     n.general.martial = Math.max(n.general.martial, 5 + rand(5)); // un soldat de métier
     n.general.victoires = 0;
-    journal(`⚔️ ${n.nom} engage le général ${n.general.nom}.`);
+    journal(`⚔️ ${n.nom} engage le général ${n.general.nom}.`, n.id);
   }
   return { ok: true };
 }
@@ -461,7 +499,7 @@ function transporterTroupes(source, cible, quantite) {
   if (quantite >= s.troupes) return { ok: false, raison: 'Une garnison doit rester' };
   ajouterArmee(c, extraireArmee(s, quantite));
   s.aBouge = true;
-  journal(`🚢 ${nation(s.proprietaire).nom} transporte ${quantite} troupes de ${s.nom} à ${c.nom} par la mer.`);
+  journal(`🚢 ${nation(s.proprietaire).nom} transporte ${quantite} troupes de ${s.nom} à ${c.nom} par la mer.`, s.proprietaire);
   return { ok: true };
 }
 
@@ -766,9 +804,36 @@ function nouvellePartie(nationJoueur, mode = 'terre') {
   return G;
 }
 
-function journal(txt) {
-  G.journal.unshift({ tour: G.tour, txt });
-  if (G.journal.length > 60) G.journal.pop();
+// « de » + nom de nation, avec l'élision et l'article corrects :
+// de l'Empire toltèque, du Royaume de France, de la Rus' de Kiev.
+function deNom(nom) {
+  if (!nom) return '';
+  if (/^[AEIOUYÉÈÊÀÂÎÔÛ]/i.test(nom)) return `de l'${nom}`;
+  if (/^(Royaume|Califat|Saint|Japon|Sultanat|Duché|Comté|Tsarat|Khanat|Shogunat)/i.test(nom)) return `du ${nom}`;
+  if (/^(Rus|République|Confédération|Ligue|Horde|Dynastie|Principauté|Cités)/i.test(nom)) return `de la ${nom}`;
+  return `de ${nom}`;
+}
+
+// Une ligne de chronique mérite sa place si elle parle au joueur.
+// portee : 'monde' (par défaut : événement marquant, toujours affiché),
+// ou l'id d'une nation concernée — la ligne est alors classée selon que
+// cette nation est le joueur, une puissance qu'il côtoie, ou un lointain.
+function journal(txt, nid) {
+  G.journal.unshift({ tour: G.tour, txt, nid: nid === undefined ? null : nid });
+  if (G.journal.length > 80) G.journal.pop();
+}
+
+// 'moi' | 'connu' | 'monde' | 'lointain'
+function porteeChronique(l) {
+  if (l.nid === null || l.nid === undefined) return 'monde';
+  if (l.nid === G.joueur) return 'moi';
+  const n = G.nations[l.nid];
+  if (!n) return 'lointain';
+  const moi = nation(G.joueur);
+  if (enGuerre(G.joueur, l.nid) || allies(G.joueur, l.nid) || aPacte(G.joueur, l.nid) ||
+      aAccord(G.joueur, l.nid) || moi.vassalDe === l.nid || n.vassalDe === G.joueur ||
+      frontalieres(G.joueur, l.nid)) return 'connu';
+  return 'lointain';
 }
 
 // ---------- Alertes du joueur ----------
@@ -1072,6 +1137,8 @@ function revenus(nid) {
   if (n.doctrine === 'rationaliste') sci *= 1.25;
   // Un bon intendant sur le trône enrichit le royaume
   if (n.dirigeant) or_ *= 1 + n.dirigeant.intendance * 0.015;
+  // Les marchands ouvrent ou ferment les bourses selon leur humeur
+  or_ *= multFaction(nid, 'marchands', 0.15);
   const orBonus = or_ - orProvinces; // part due à la doctrine et au souverain
   // Impôts : la population paie
   or_ += popTotale * 0.15;
@@ -1139,6 +1206,7 @@ function simulerBataille(source, cible, amphibie = false, essais = 300) {
   const att = nation(s.proprietaire);
   let multAtt = amphibie ? 0.85 : 1;
   if (att.doctrine === 'militariste') multAtt *= 1.1;
+  multAtt *= multFaction(att.id, 'nobles', 0.1); // une noblesse comblée se bat mieux
   if (att.dirigeant) multAtt *= 1 + att.dirigeant.martial * 0.015;
   if (att.general) multAtt *= 1 + att.general.martial * 0.02;
   // Composition engagée (copie, une garnison reste)
@@ -1295,7 +1363,7 @@ function emprunter(nid, montant) {
   if (n.dette + montant > DETTE_MAX) return { ok: false, raison: `Dette maximale atteinte (${DETTE_MAX} 💰)` };
   n.or += montant;
   n.dette += montant;
-  journal(`🏦 ${n.nom} emprunte ${montant} 💰 aux banquiers (dette : ${n.dette}).`);
+  journal(`🏦 ${n.nom} emprunte ${montant} 💰 aux banquiers (dette : ${n.dette}).`, n.id);
   return { ok: true };
 }
 
@@ -1389,7 +1457,7 @@ function embaucherMercenaires(nid, index) {
   n.or -= cie.cout;
   ajouterArmee(cap, { inf: cie.inf, choc: cie.choc, siege: cie.siege });
   G.mercenaires.splice(index, 1);
-  journal(`🏴 ${n.nom} engage la ${cie.nom} (${cie.inf + cie.choc + cie.siege} soldats, déployés à ${cap.nom}).`);
+  journal(`🏴 ${n.nom} engage la ${cie.nom} (${cie.inf + cie.choc + cie.siege} soldats, déployés à ${cap.nom}).`, n.id);
   return { ok: true, province: cap.id };
 }
 
@@ -1434,7 +1502,7 @@ function acheterRessourceNation(a, b, bien) {
   nation(a).marchandises[bien] += QTE;
   vendeur.marchandises[bien] -= QTE;
   modifierRelation(a, b, 3);
-  journal(`🛒 ${nation(a).nom} achète ${QTE} ${MARCHANDISES[bien].icone} à ${vendeur.nom} pour ${prix} 💰.`);
+  journal(`🛒 ${nation(a).nom} achète ${QTE} ${MARCHANDISES[bien].icone} à ${vendeur.nom} pour ${prix} 💰.`, a);
   return { ok: true };
 }
 
@@ -1457,7 +1525,7 @@ function exigerTribut(a, b) {
     declarerGuerre(b, a);
     return { ok: false, raison: `${cible.nom} répond à votre insolence par la guerre !` };
   }
-  journal(`🪙 ${cible.nom} rejette avec mépris l'ultimatum de ${nation(a).nom}.`);
+  journal(`🪙 ${cible.nom} rejette avec mépris l'ultimatum ${deNom(nation(a).nom)}.`, a);
   return { ok: false, raison: `${cible.nom} refuse de plier (soyez 2× plus puissant).` };
 }
 
@@ -1490,7 +1558,7 @@ function verifierAttaque(source, cible) {
   }
   if (c.proprietaire >= 0) {
     if (estVassal(c.proprietaire, s.proprietaire)) return { ok: false, raison: `${nation(c.proprietaire).nom} est votre vassal` };
-    if (estVassal(s.proprietaire, c.proprietaire)) return { ok: false, raison: `Vous êtes vassal de ${nation(c.proprietaire).nom}` };
+    if (estVassal(s.proprietaire, c.proprietaire)) return { ok: false, raison: `Vous êtes vassal ${deNom(nation(c.proprietaire).nom)}` };
     if (!enGuerre(s.proprietaire, c.proprietaire)) {
       return { ok: false, guerreRequise: c.proprietaire, raison: `Il faut d'abord déclarer la guerre à ${nation(c.proprietaire).nom}` };
     }
@@ -1516,6 +1584,7 @@ function resoudreAttaque(source, cible, multAtt = 1) {
   const s = G.provinces[source], c = G.provinces[cible];
   const att = nation(s.proprietaire);
   if (att.doctrine === 'militariste') multAtt *= 1.1;
+  multAtt *= multFaction(att.id, 'nobles', 0.1); // une noblesse comblée se bat mieux
   if (att.dirigeant) multAtt *= 1 + att.dirigeant.martial * 0.015; // génie militaire du souverain
   if (att.general) multAtt *= 1 + att.general.martial * 0.02;      // et celui du général
   const engages = extraireArmee(s, s.troupes - 1); // une garnison reste
@@ -1556,7 +1625,7 @@ function resoudreAttaque(source, cible, multAtt = 1) {
     if (ancienProprio >= 0) {
       modifierRelation(ancienProprio, s.proprietaire, -20);
       if (etaitCapitale) {
-        journal(`🔥 ${att.nom} s'empare de ${nomCible}, capitale de ${nation(ancienProprio).nom} !`);
+        journal(`🔥 ${att.nom} s'empare de ${nomCible}, capitale ${deNom(nation(ancienProprio).nom)} !`);
         nation(ancienProprio).stabilite -= 20;
         // Nouvelle capitale ou élimination
         const restantes = provincesDe(ancienProprio);
@@ -1589,13 +1658,13 @@ function resoudreAttaque(source, cible, multAtt = 1) {
     if (c.batiments.fort > 0) {
       c.usureFort = Math.min(0.75, (c.usureFort || 0) + 0.25);
       if (c.pop > 2) c.pop--;
-      journal(`🛡️ ${nomCible} repousse l'assaut de ${att.nom}, mais ses murailles s'effritent (−${Math.round(c.usureFort * 100)} %).`);
+      journal(`🛡️ ${nomCible} repousse l'assaut ${deNom(att.nom)}, mais ses murailles s'effritent (−${Math.round(c.usureFort * 100)} %).`, att.id);
     } else {
-      journal(`🛡️ ${nomCible} repousse l'assaut de ${att.nom}.`);
+      journal(`🛡️ ${nomCible} repousse l'assaut ${deNom(att.nom)}.`, att.id);
     }
     // Le général peut tomber au champ d'honneur
     if (att.general && Math.random() < 0.12) {
-      journal(`⚰️ Le général ${att.general.nom} de ${att.nom} tombe au combat !`);
+      journal(`⚰️ Le général ${att.general.nom} ${deNom(att.nom)} tombe au combat !`, att.id);
       if (att.joueur) G.message = { titre: '⚰️ Mort au champ d\'honneur', texte: `Le général ${att.general.nom} est tombé lors de l'assaut de ${nomCible}. Ses hommes pleurent leur chef.` };
       att.general = null;
     }
@@ -1619,7 +1688,7 @@ function peutAttaquerAmphibie(source, cible) {
 
 function attaqueAmphibie(source, cible) {
   if (!peutAttaquerAmphibie(source, cible)) return { ok: false, raison: 'Invasion impossible' };
-  journal(`🌊 Débarquement de ${nation(G.provinces[source].proprietaire).nom} sur ${G.provinces[cible].nom} !`);
+  journal(`🌊 Débarquement ${deNom(nation(G.provinces[source].proprietaire).nom)} sur ${G.provinces[cible].nom} !`);
   return resoudreAttaque(source, cible, 0.85); // débarquer sous le feu coûte cher
 }
 
@@ -1851,7 +1920,7 @@ function demanderVassalite(a, b) {
   cible.vassalDe = a;
   if (enGuerre(a, b)) faireLaPaix(a, b);
   modifierRelation(a, b, 10);
-  journal(`👑 ${cible.nom} devient vassal de ${nation(a).nom} !`);
+  journal(`👑 ${cible.nom} devient vassal ${deNom(nation(a).nom)} !`);
   return { ok: true };
 }
 

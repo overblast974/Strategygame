@@ -131,7 +131,7 @@ function initPixi() {
     UI.monde.addChild(UI.couches[nom]);
   }
   // Graphics partagés
-  for (const nom of ['eau', 'vagues', 'terrain', 'politique', 'frontieres', 'mien', 'routes', 'cibles', 'selection', 'unites']) {
+  for (const nom of ['eau', 'vagues', 'terrain', 'politique', 'frontieres', 'mien', 'menace', 'routes', 'cibles', 'selection', 'unites']) {
     UI.gfx[nom] = new PIXI.Graphics();
   }
   UI.couches.routes.addChild(UI.gfx.routes);
@@ -141,6 +141,7 @@ function initPixi() {
   UI.couches.politique.addChild(UI.gfx.politique);
   UI.couches.frontieres.addChild(UI.gfx.frontieres);
   UI.couches.frontieres.addChild(UI.gfx.mien);
+  UI.couches.surbrillance.addChild(UI.gfx.menace);
   UI.couches.surbrillance.addChild(UI.gfx.cibles);
   UI.couches.surbrillance.addChild(UI.gfx.selection);
   UI.couches.unites.addChild(UI.gfx.unites);
@@ -288,9 +289,30 @@ function majNomsVisibles() {
 }
 
 // ---------- Mise à jour de la scène (état du jeu → affichage) ----------
+// Niveau de détail : de loin, 10 000 pastilles à chiffres ne sont plus de
+// l'information mais du bruit. On ne garde alors que ce qui se lit d'un
+// coup d'œil — les territoires, mes frontières, et là où ça chauffe.
+function niveauDetail(zoom) {
+  if (zoom >= 0.7) return 'proche';
+  if (zoom >= 0.32) return 'moyen';
+  return 'loin';
+}
+
 function dessiner() {
   if (!UI.app || !G) return;
   const s = UI.hexSize;
+  const zoom = UI.cam.zoom;
+  const lod = niveauDetail(zoom);
+  UI.lodDessine = lod;
+  UI.zoomDessine = zoom;
+  // Les traits sont dessinés dans le monde, donc rétrécis par le zoom :
+  // on les épaissit d'autant pour qu'ils gardent leur épaisseur à l'écran.
+  const k = Math.min(7, Math.max(1, 1 / Math.max(0.06, zoom)));
+
+  // Décor et gisements disparaissent dès qu'on s'éloigne
+  UI.couches.decor.visible = lod === 'proche';
+  UI.couches.gisements.visible = lod === 'proche' && UI.modeCarte === 'ressources';
+  UI.couches.icones.visible = lod !== 'loin';
 
   // Cibles valides depuis la sélection
   const selection = UI.selection >= 0 ? G.provinces[UI.selection] : null;
@@ -314,7 +336,13 @@ function dessiner() {
 
   // Opacité politique selon le mode de carte
   const modeC = UI.modeCarte;
-  const alphaPol = modeC === 'terrain' ? 0 : modeC === 'ressources' ? 0.25 : modeC === 'militaire' ? 0.82 : 0.61;
+  let alphaPol = modeC === 'terrain' ? 0 : modeC === 'ressources' ? 0.25 : modeC === 'militaire' ? 0.82 : 0.61;
+  // De loin, le terrain n'apprend plus rien : ce sont les empires qu'on veut
+  // lire, donc leurs couleurs deviennent franches au lieu de s'estomper.
+  if (alphaPol > 0) {
+    if (lod === 'loin') alphaPol = Math.max(alphaPol, 0.9);
+    else if (lod === 'moyen') alphaPol = Math.max(alphaPol, 0.72);
+  }
 
   // Mon royaume doit se lire d'un coup d'œil : teinte plus franche que les
   // autres nations, et un liseré doré tout autour de mes terres.
@@ -330,7 +358,8 @@ function dessiner() {
     // Teinte politique — la mienne saturée, celle des autres en retrait
     if (alphaPol > 0) {
       if (p.proprietaire >= 0) {
-        const a = mien ? Math.min(0.95, alphaPol * 1.3) : alphaPol * 0.78;
+        const a = mien ? Math.min(0.97, alphaPol * 1.3)
+          : lod === 'loin' ? alphaPol : alphaPol * 0.78;
         gPol.beginFill(couleurNum(nation(p.proprietaire).couleur), a);
         gPol.drawPolygon(pts.flat());
         gPol.endFill();
@@ -347,8 +376,8 @@ function dessiner() {
       const cv = hexCentre(v.col, v.row);
       const [a, b] = areteVers(pts, cv);
       if (v.terrain === 'eau') {
-        if (!mien) {
-          gFro.lineStyle(2.5, 0xe8d9a0, 0.4);
+        if (!mien && lod !== 'loin') {
+          gFro.lineStyle(2.5 * k, 0xe8d9a0, 0.4);
           gFro.moveTo(a[0], a[1]);
           gFro.lineTo(b[0], b[1]);
         }
@@ -357,14 +386,18 @@ function dessiner() {
         const guerre = mien && mesEnnemis.has(v.proprietaire);
         const coul = guerre ? 0xff4433
           : p.proprietaire >= 0 ? assombrirNum(nation(p.proprietaire).couleur, 1.35) : 0x111111;
-        gFro.lineStyle(guerre ? 4 : 3, coul, p.proprietaire >= 0 ? 1 : 0.6);
-        gFro.moveTo(a[0], a[1]);
-        gFro.lineTo(b[0], b[1]);
+        // De loin, seules les frontières entre nations restent tracées :
+        // les limites internes disparaissent pour laisser voir les blocs.
+        if (lod !== 'loin' || guerre || mien) {
+          gFro.lineStyle((guerre ? 4 : 3) * k, coul, p.proprietaire >= 0 ? 1 : 0.6);
+          gFro.moveTo(a[0], a[1]);
+          gFro.lineTo(b[0], b[1]);
+        }
       }
       // Contour extérieur de mon royaume (mer comprise) : double trait doré
       if (mien && (v.terrain === 'eau' || v.proprietaire !== G.joueur)) {
         for (const [larg, coulM, alphaM] of [[7, 0x000000, 0.35], [4.5, 0xffe9a0, 0.95]]) {
-          gMien.lineStyle(larg, coulM, alphaM);
+          gMien.lineStyle(larg * k, coulM, alphaM);
           gMien.moveTo(a[0], a[1]);
           gMien.lineTo(b[0], b[1]);
         }
@@ -394,9 +427,11 @@ function dessiner() {
       icoTxt.visible = false;
     }
 
-    // Pions de troupes
+    // Pions de troupes : au loin on n'en montre plus aucun (c'était un océan
+    // de pastilles noires), à mi-distance seulement les armées qui comptent.
     let effTxt = UI.pool.effectifs.get(p.id);
-    if (p.troupes > 0) {
+    const seuilPion = lod === 'loin' ? Infinity : lod === 'moyen' ? 5 : 1;
+    if (p.troupes >= seuilPion) {
       const grise = p.proprietaire === G.joueur && p.aBouge;
       gUni.lineStyle(2, p.proprietaire >= 0 ? couleurNum(nation(p.proprietaire).couleur) : 0x999999);
       gUni.beginFill(grise ? 0x4a525c : 0x141b24);
@@ -446,6 +481,29 @@ function dessiner() {
     }
   }
 
+  // Où ma frontière est menacée : un point rouge sur mes provinces qui font
+  // face à des troupes ennemies. C'est la seule chose qui doit se voir de loin.
+  const gMen = UI.gfx.menace; gMen.clear();
+  if (mesEnnemis.size) {
+    const rayon = s * (lod === 'loin' ? 0.75 : 0.42);
+    for (const p of G.provinces) {
+      if (p.proprietaire !== G.joueur) continue;
+      let pression = 0;
+      for (const vid of voisinsHex(p.col, p.row)) {
+        const v = G.provinces[vid];
+        if (mesEnnemis.has(v.proprietaire)) pression += v.troupes;
+      }
+      if (pression === 0) continue;
+      const c = hexCentre(p.col, p.row);
+      const grave = pression >= p.troupes * 1.5;
+      gMen.lineStyle(2.5 * k, 0x2a0d09, 0.8);
+      gMen.beginFill(grave ? 0xff2d1a : 0xff8c42, 0.9);
+      gMen.drawCircle(c.x, c.y - s * 0.05, rayon);
+      gMen.endFill();
+      gMen.lineStyle(0);
+    }
+  }
+
   // Surbrillance des cibles (pulse animé dans tick)
   for (const pid of ciblesValides) {
     const p = G.provinces[pid];
@@ -485,10 +543,18 @@ function tick() {
   UI.monde.position.set(UI.cam.x + sx, UI.cam.y + sy);
   UI.monde.scale.set(UI.cam.zoom);
 
+  // Le niveau de détail et l'épaisseur des traits dépendent du zoom :
+  // on redessine quand il a assez changé (pas à chaque image du pincement).
+  if (UI.ecran === 'jeu' && G) {
+    const ratio = UI.cam.zoom / (UI.zoomDessine || UI.cam.zoom);
+    if (niveauDetail(UI.cam.zoom) !== UI.lodDessine || ratio > 1.2 || ratio < 0.83) dessiner();
+  }
+
   // Pulsations
   UI.gfx.selection.alpha = 0.65 + 0.35 * Math.sin(UI.temps * 5);
   UI.gfx.cibles.alpha = 0.55 + 0.45 * Math.sin(UI.temps * 4);
   UI.gfx.vagues.alpha = 0.5 + 0.5 * Math.sin(UI.temps * 1.2);
+  UI.gfx.menace.alpha = 0.7 + 0.3 * Math.sin(UI.temps * 3.5);
 
   // Noms visibles selon le zoom (étiquettes créées à la demande)
   const voulu = UI.cam.zoom > 0.75;
@@ -1344,9 +1410,30 @@ function uiDoctrine(id) {
 }
 
 // ---------- Journal ----------
-function ouvrirJournal() {
-  let html = `<h2>📜 Chroniques</h2><div class="journal">`;
-  for (const l of G.journal) html += `<div class="ligne-journal"><small>Tour ${l.tour}</small> ${l.txt}</div>`;
+// Le journal trie ce qui touche le joueur de ce qui se passe au loin :
+// par défaut on ne montre que son royaume et les puissances qu'il côtoie.
+function chroniquesFiltrees(tout) {
+  return G.journal.filter(l => {
+    const portee = porteeChronique(l);
+    return tout || portee !== 'lointain';
+  });
+}
+
+function ouvrirJournal(tout) {
+  UI.journalTout = tout === undefined ? UI.journalTout : tout;
+  const lignes = chroniquesFiltrees(UI.journalTout);
+  const caches = G.journal.length - chroniquesFiltrees(false).length;
+  const marque = { moi: 'moi', connu: 'connu', monde: 'monde', lointain: 'lointain' };
+  let html = `<h2>📜 Chroniques</h2>
+    <div class="choix-mode">
+      <button class="btn ${UI.journalTout ? '' : 'btn-principal'}" onclick="ouvrirJournal(false)">🛡️ Mon monde</button>
+      <button class="btn ${UI.journalTout ? 'btn-principal' : ''}" onclick="ouvrirJournal(true)">🌍 Tout${caches ? ` (+${caches})` : ''}</button>
+    </div>
+    <div class="journal">`;
+  if (!lignes.length) html += '<p><small>Rien à raconter pour l\'instant.</small></p>';
+  for (const l of lignes) {
+    html += `<div class="ligne-journal ${marque[porteeChronique(l)]}"><small>Tour ${l.tour}</small> ${l.txt}</div>`;
+  }
   html += `</div><div class="rangee-btn"><button class="btn" onclick="fermerModale()">Fermer</button></div>`;
   ouvrirModale(html);
 }
@@ -1494,8 +1581,8 @@ function majBarre() {
     </button>`;
 
   document.getElementById('barre-haut').innerHTML = `
-    <div class="bh-rang1">
-      <button class="bh-nation" onclick="ouvrirHub()" style="--coul:${moi.couleur}">
+    <div class="bh-rang1 ${guerres ? 'chargee' : ''}">
+      <button class="bh-nation" onclick="ouvrirHub()" style="--coul:${moi.couleur}" title="${moi.nom}">
         <span class="bh-blason" style="background:${moi.couleur}"></span>
         <span class="bh-nom">${moi.nom}</span>
         <span class="bh-sous">an ${G.annee} · ${provincesDe(G.joueur).length} prov.</span>
@@ -1674,15 +1761,31 @@ function hubRoyaume(moi, b, rev) {
 
     <h3 class="titre-section">🏛️ Factions internes</h3>
     ${['nobles', 'marchands', 'peuple'].map(f => {
-      const v = moi.factions[f];
-      const coul = v <= 25 ? '#e55' : v <= 40 ? '#cc5' : '#7ec97e';
-      const noms = { nobles: '⚜️ Noblesse', marchands: '⚖️ Marchands', peuple: '👥 Peuple' };
-      return `<div class="ligne-detail"><span>${noms[f]}${v <= 25 ? ' ⚠️' : ''}</span>
-        <span class="barre-prog" style="width:90px;margin:0"><span class="barre-prog-int" style="width:${v}%;background:${coul};display:block;height:100%"></span></span></div>`;
+      const v = Math.round(moi.factions[f]);
+      const humeur = humeurFaction(G.joueur, f);
+      const def = EFFETS_FACTIONS[f];
+      const coul = v <= 12 ? '#e03e2f' : v <= SEUIL_FACTION_FACHEE ? '#d97b2f'
+        : v >= SEUIL_FACTION_CONTENTE ? '#7ec97e' : '#6f8499';
+      const effet = humeur > 0 ? `<span class="fa-effet bon">${def.content}</span>`
+        : humeur < 0 ? `<span class="fa-effet mauvais">${def.fache}</span>`
+        : `<span class="fa-effet">sans effet — ${SEUIL_FACTION_CONTENTE - v} points pour obtenir « ${def.content} »</span>`;
+      return `<div class="faction ${humeur < 0 ? 'fachee' : humeur > 0 ? 'contente' : ''}">
+        <div class="fa-tete"><b>${def.nom}</b><span class="fa-val" style="color:${coul}">${v}${v <= 12 ? ' ⚠️ révolte !' : ''}</span></div>
+        <div class="fa-jauge">
+          <span class="fa-remplissage" style="width:${v}%;background:${coul}"></span>
+          <span class="fa-seuil" style="left:${SEUIL_FACTION_FACHEE}%"></span>
+          <span class="fa-seuil" style="left:${SEUIL_FACTION_CONTENTE}%"></span>
+        </div>
+        ${effet}
+        <small class="fa-veut">Veut ${def.veut}</small>
+      </div>`;
     }).join('')}
+    <p><small>Sous ${SEUIL_FACTION_FACHEE}, une faction vous pénalise ; au-dessus de ${SEUIL_FACTION_CONTENTE}, elle vous récompense. À 12, elle se soulève et des provinces font sécession.</small></p>
 
     <h3 class="titre-section">📜 Dernières chroniques</h3>
-    ${G.journal.slice(0, 6).map(l => `<div class="ligne-journal"><small>Tour ${l.tour}</small> ${l.txt}</div>`).join('')}
+    ${chroniquesFiltrees(false).slice(0, 6).map(l =>
+      `<div class="ligne-journal ${porteeChronique(l)}"><small>Tour ${l.tour}</small> ${l.txt}</div>`).join('')
+      || '<p><small>Aucune nouvelle de votre royaume pour l\'instant.</small></p>'}
     <div class="rangee-btn"><button class="btn" onclick="ouvrirJournal()">📜 Tout le journal</button>
       <button class="btn" onclick="ouvrirDynastie()">👑 Dynastie</button></div>`;
 }
