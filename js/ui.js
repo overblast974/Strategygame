@@ -856,7 +856,7 @@ function afficherPanneauProvince(pid) {
   <div class="pp-stats">
     <span>👥 ${p.pop}/${capaciteProvince(p)} habitants <small>· bras : ${rendement} %</small></span>
     <span>Gisements : ${gisements || 'aucun'}${orGisement && !p.batiments.mine_or ? ' <small>(🪙 : bâtir une mine d\'or !)</small>' : ''}</span>
-    <span>🛡️ Défense ×${(t.defense * (1 + p.batiments.fort * BATIMENTS.fort.bonus * (1 - (p.usureFort || 0)))).toFixed(1)}${p.usureFort > 0 ? ` <small>(murailles −${Math.round(p.usureFort * 100)} %)</small>` : ''}</span>
+    <span>🛡️ Défense ×${(t.defense * defenseProvince(p) * (1 + p.batiments.fort * BATIMENTS.fort.bonus * (1 - (p.usureFort || 0)))).toFixed(1)}${p.usureFort > 0 ? ` <small>(murailles −${Math.round(p.usureFort * 100)} %)</small>` : ''}${defenseProvince(p) > 1 ? ' <small>(caserne / voie militaire)</small>' : ''}</span>
     <span>⚔️ ${p.troupes} soldats (${TYPES_UNITES.inf.icone}${p.armee.inf} ${TYPES_UNITES.choc.icone}${p.armee.choc} ${TYPES_UNITES.siege.icone}${p.armee.siege})${monTour && p.aBouge ? ' · a agi' : ''}</span>
   </div>`;
 
@@ -886,9 +886,13 @@ function afficherPanneauProvince(pid) {
     html += voisinesJouables(p);
 
     html += `<div class="pp-recrues">`;
+    const remise = remiseRecrutement(p);
     for (const [type, def] of Object.entries(TYPES_UNITES)) {
       const c = def.cout;
-      const couts = `1👥 ${c.or}💰 ${c.nourriture}🌾${c.fer ? ` ${c.fer}⚒️` : ''}${c.pierre ? ` ${c.pierre}🪨` : ''}`;
+      const orPaye = Math.round(c.or * (moi.doctrine === 'militariste' ? 0.8 : 1) * (1 - remise));
+      const orTxt = orPaye < c.or
+        ? `<s>${c.or}</s> ${orPaye}💰` : `${c.or}💰`;
+      const couts = `1👥 ${orTxt} ${c.nourriture}🌾${c.fer ? ` ${c.fer}⚒️` : ''}${c.pierre ? ` ${c.pierre}🪨` : ''}`;
       html += `<div class="ligne-recrue">
         <div class="lr-info"><b>${def.icone} ${def.noms[moi.ere]}</b><small>${couts} par unité</small></div>
         <button class="btn btn-mini" onclick="uiRecruter(${pid},'${type}',1)">+1</button>
@@ -910,9 +914,9 @@ function afficherPanneauProvince(pid) {
     if (actions) html += `<div class="pp-actions">${actions}</div>`;
 
     // Spécialisation de la province (affectation de la population)
-    html += `<div class="pp-emplacements">👥 Spécialisation :</div><div class="rangee-focus">`;
+    html += `<div class="pp-emplacements">👥 Spécialisation : <small>${EFFETS_FOCUS[p.focus] || ''}</small></div><div class="rangee-focus">`;
     for (const [id, fdef] of Object.entries(FOCUS_PROVINCE)) {
-      html += `<button class="btn btn-focus ${p.focus === id ? 'actif' : ''}" onclick="uiFocus(${pid},'${id}')" title="${fdef.nom}">${fdef.icone}<br><small>${fdef.nom}</small></button>`;
+      html += `<button class="btn btn-focus ${p.focus === id ? 'actif' : ''}" onclick="uiFocus(${pid},'${id}')" title="${fdef.nom} — ${EFFETS_FOCUS[id]}">${fdef.icone}<small>${fdef.nom}</small></button>`;
     }
     html += `</div>`;
 
@@ -1012,7 +1016,7 @@ function uiTransporter(source, cible) {
 
 function uiFocus(pid, focus) {
   definirFocus(pid, focus);
-  toast(`${FOCUS_PROVINCE[focus].icone} ${G.provinces[pid].nom} devient ${FOCUS_PROVINCE[focus].nom.toLowerCase()}.`);
+  toast(`${FOCUS_PROVINCE[focus].icone} ${G.provinces[pid].nom} : ${EFFETS_FOCUS[focus]}`);
   majTout();
   afficherPanneauProvince(pid);
 }
@@ -2013,6 +2017,7 @@ function ouvrirAide() {
     👥 La <b>population</b> travaille (rendement max à 8+) et fournit les recrues. Démobilisez pour repeupler.<br>
     ⛏️ Un <b>gisement</b> produit 1/tour ; avec son bâtiment (mine, scierie…) : jusqu'à 7/tour.<br>
     🏗️ <b>4 emplacements</b> de bâtiment par province : spécialisez-vous !<br>
+    ⚔️ La <b>caserne</b> allège la solde des recrues levées sur place (−12 % par niveau) et renforce la défense ; la spécialisation <b>Militaire</b> ajoute −15 % sur les recrues et ×1,25 en défense, au prix de −25 % sur toute la production.<br>
     ⚓ Le <b>port</b> ouvre le commerce maritime, le contact avec les nations lointaines et les invasions.<br>
     🕊️ On ne traite qu'avec les nations <b>en contact</b> (frontière ou ports des deux côtés).<br>
     💍 <b>Mariages royaux</b> et cadeaux montent les relations ; les alliés rejoignent vos guerres défensives.<br>

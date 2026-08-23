@@ -417,9 +417,21 @@ button { font-family: inherit; cursor: pointer; }
 .pp-emplacements { font-size: 12px; color: #9db2c7; margin: 8px 0 6px; font-weight: 600; }
 .choix-mode { display: flex; gap: 8px; margin: 14px 0 4px; }
 .choix-mode .btn { flex: 1; }
-.rangee-focus { display: flex; gap: 5px; margin-bottom: 10px; }
-.btn-focus { flex: 1; padding: 6px 2px; font-size: 15px; }
-.btn-focus small { font-size: 8.5px; display: block; }
+/* Les spécialisations tiennent sur deux rangées : avec cinq ou six voies,
+   une seule ligne déborde de l'écran et coupe la dernière. */
+.rangee-focus {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 6px; margin-bottom: 10px;
+}
+.btn-focus {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 8px 4px; font-size: 17px; min-width: 0;
+}
+.btn-focus small {
+  font-size: 10px; display: block; line-height: 1.2;
+  overflow-wrap: anywhere; color: #9db2c7;
+}
+.btn-focus.actif small { color: #ffe9a0; }
 .btn-focus.actif { border-color: #c9962f; background: #3a3323; }
 .bh-menu {
   background: #223142; color: #e8e2d5;

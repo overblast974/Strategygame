@@ -125,6 +125,7 @@ const BATIMENTS = {
   mine_or:    { nom: 'Mine d\'or',  icone: '🪙', type: 'extraction', bien: 'or',     bonus: 3, coutBase: 65, bois: 8,  pierre: 6 },
   forge:        { nom: 'Forge',            icone: '🗡️', type: 'commun', bonus: 1, coutBase: 60, bois: 6, pierre: 8 },
   atelier_luxe: { nom: 'Atelier de luxe',  icone: '💎', type: 'commun', bonus: 1, coutBase: 70, bois: 10, pierre: 4 },
+  caserne:      { nom: 'Caserne',          icone: '⚔️', type: 'commun', bonus: 0.12, coutBase: 55, bois: 10, pierre: 6 },
 };
 const NIVEAU_MAX_BATIMENT = 3;
 const EMPLACEMENTS_PROVINCE = 4;   // bâtiments différents max par province (+1 en capitale)
@@ -143,6 +144,7 @@ const NOMS_BATIMENTS_PAR_ERE = {
   mine_or:    ['Mine d\'or', 'Orpaillage royal', 'Mine profonde', 'Extraction chimique', 'Collecteur d\'astéroïdes'],
   forge:        ['Forge', 'Armurerie', 'Manufacture d\'armes', 'Arsenal', 'Fabrique de plasma'],
   atelier_luxe: ['Atelier de luxe', 'Maison de soieries', 'Manufacture royale', 'Haute couture', 'Orfèvrerie quantique'],
+  caserne:      ['Caserne', 'Caserne royale', 'École militaire', 'Base d\'entraînement', 'Académie martiale'],
 };
 
 // Gisements possibles par terrain : [bien, probabilité]
@@ -316,6 +318,17 @@ const FOCUS_PROVINCE = {
   minier:     { nom: 'Minier',     icone: '⛏️' },  // +50 % marchandises
   lettre:     { nom: 'Lettré',     icone: '📚' },  // +50 % science
   commercant: { nom: 'Commerçant', icone: '💰' },  // +50 % or
+  militaire:  { nom: 'Militaire',  icone: '🛡️' },  // recrues −15 %, défense +25 %
+};
+
+// Ce que chaque voie apporte, pour l'afficher au joueur
+const EFFETS_FOCUS = {
+  equilibre:  'Aucun bonus, aucun malus',
+  agricole:   '+50 % de nourriture · −25 % sur le reste',
+  minier:     '+50 % de marchandises · −25 % sur le reste',
+  lettre:     '+50 % de science · −25 % sur le reste',
+  commercant: "+50 % d'or · −25 % sur le reste",
+  militaire:  'Recrues −15 % · défense ×1,25 · −25 % de production',
 };
 
 // ---- Marine de guerre ----

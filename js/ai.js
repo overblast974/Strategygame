@@ -178,6 +178,14 @@ function iaConstruire(nid, perso, miennes) {
       if (type === 'ecole') poids *= 1 + perso.science;
       if (type === 'fort') poids *= 0.5 + perso.agression;
       if (type === 'mine_fer') poids *= 1 + perso.agression;         // l'industrie de guerre
+      // La caserne intéresse les belliqueux, surtout aux frontières chaudes
+      if (type === 'caserne') {
+        const menacee = voisinsHex(p.col, p.row).some(v => {
+          const q = G.provinces[v];
+          return q.proprietaire >= 0 && q.proprietaire !== nid && enGuerre(nid, q.proprietaire);
+        });
+        poids = (0.4 + perso.agression * 2) * (menacee ? 2.5 : 1);
+      }
       if (type === 'forge') poids = n.marchandises.fer >= 15 ? 2 + perso.agression * 2 : 0.3;
       if (type === 'atelier_luxe') poids = n.marchandises.epices >= 15 ? 2 + perso.commerce * 2 : 0.3;
       options.push({ type, poids });

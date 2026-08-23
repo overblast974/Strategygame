@@ -147,10 +147,27 @@ function facteurTravail(p) {
 }
 
 // Multiplicateur de spécialisation : +50 % sur la voie choisie, −25 % ailleurs
-const FOCUS_CATEGORIES = { agricole: 'nourriture', minier: 'marchandise', lettre: 'science', commercant: 'or' };
+// La voie militaire n'a aucune catégorie de production : toutes tombent donc
+// au malus de 0,75, ce qui est le prix de ses bonus militaires.
+const FOCUS_CATEGORIES = { agricole: 'nourriture', minier: 'marchandise', lettre: 'science', commercant: 'or', militaire: 'aucune' };
 function focusMult(p, categorie) {
   if (!p.focus || p.focus === 'equilibre') return 1;
   return FOCUS_CATEGORIES[p.focus] === categorie ? 1.5 : 0.75;
+}
+
+// Réduction du coût en or des recrues levées dans cette province :
+// chaque niveau de caserne allège la solde, la voie militaire aussi.
+function remiseRecrutement(p) {
+  const caserne = (p.batiments.caserne || 0) * BATIMENTS.caserne.bonus;
+  const focus = p.focus === 'militaire' ? 0.15 : 0;
+  return Math.min(0.55, caserne + focus);
+}
+
+// Multiplicateur de défense apporté par la caserne et la voie militaire
+function defenseProvince(p) {
+  const caserne = 1 + (p.batiments.caserne || 0) * 0.1;
+  const focus = p.focus === 'militaire' ? 1.25 : 1;
+  return caserne * focus;
 }
 
 function definirFocus(pid, focus) {
@@ -1310,7 +1327,7 @@ function simulerBataille(source, cible, amphibie = false, essais = 300) {
   const ereDef = c.proprietaire >= 0 ? nation(c.proprietaire).ere : 0;
   const reducSiege = Math.max(0.35, 1 - engages.siege * 0.12);
   const bonusFort = 1 + c.batiments.fort * BATIMENTS.fort.bonus * reducSiege * (1 - (c.usureFort || 0));
-  const bonusTerrain = TERRAINS[c.terrain].defense;
+  const bonusTerrain = TERRAINS[c.terrain].defense * defenseProvince(c);
   const baseAtt = forceAttaque(engages, att.ere) * multAtt;
   const baseDef = Math.max(1, forceDefense(c.armee, ereDef)) * bonusFort * bonusTerrain;
 
@@ -1388,7 +1405,7 @@ function recruter(pid, type, quantite) {
   const p = G.provinces[pid];
   const n = nation(p.proprietaire);
   const c = TYPES_UNITES[type].cout;
-  const coutOr = Math.round(c.or * quantite * (n.doctrine === 'militariste' ? 0.8 : 1));
+  const coutOr = Math.round(c.or * quantite * (n.doctrine === 'militariste' ? 0.8 : 1) * (1 - remiseRecrutement(p)));
   if (p.pop <= quantite) return { ok: false, raison: `Population insuffisante (${quantite} 👥 requis, il faut en garder)` };
   if (n.or < coutOr) return { ok: false, raison: 'Or insuffisant' };
   if (n.nourriture < c.nourriture * quantite) return { ok: false, raison: 'Nourriture insuffisante' };
@@ -1687,7 +1704,7 @@ function resoudreAttaque(source, cible, multAtt = 1) {
   // Les armes de siège neutralisent une partie des fortifications
   const reducSiege = Math.max(0.35, 1 - engages.siege * 0.12);
   const bonusFort = 1 + c.batiments.fort * BATIMENTS.fort.bonus * reducSiege * (1 - (c.usureFort || 0));
-  const bonusTerrain = TERRAINS[c.terrain].defense;
+  const bonusTerrain = TERRAINS[c.terrain].defense * defenseProvince(c);
   const forceAtt = forceAttaque(engages, att.ere) * multAtt * randF(0.85, 1.2);
   const forceDef = Math.max(1, forceDefense(c.armee, ereDef)) * bonusFort * bonusTerrain * randF(0.85, 1.2);
 
